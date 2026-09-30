@@ -52,3 +52,29 @@ Plaid env: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ACCESS_TOKEN`, `PLAID_ENV`.
 - Backtest bars are processed on OHLC; intrabar order of TP vs stop is unknowable, so stop wins.
 - Live loop does not reconcile state with the exchange after a restart — do not restart with an open position.
 - US residents generally cannot legally access offshore crypto perps; regulated alternatives (CME micro futures) need ~$1–2k+ margin per contract, far above round-up balances.
+
+---
+
+# kalshi: KXBTC15M last-2-minute recorder (no trading)
+
+Checks whether buying the ~80¢ favorite in Kalshi's 15-minute BTC up/down markets in the final 2 minutes actually has an edge. It **records only** and never places orders.
+
+| Piece | File | What it does |
+|---|---|---|
+| Fair value | `kalshi/model.py` | P(YES) given spot, `floor_strike`, seconds left, realized vol, and the part of the 60s settlement average already locked in |
+| Data | `kalshi/client.py` | Public Kalshi REST v2 (no key) + Coinbase Exchange spot/1m candles as the BRTI proxy |
+| Recorder | `kalshi/recorder.py` | Every 2s in the last 120s: book + fair value → `data/kalshi/snapshots.jsonl`; settled result → `outcomes.jsonl` |
+| Scoring | `kalshi/analyze.py` | One trade per market; win rate with Wilson 95% CI vs breakeven (ask + fee); Brier score model vs market; calibration table |
+
+```bash
+python -m kalshi record                 # leave running for weeks (tmux / systemd / a small VPS)
+python -m kalshi resolve                # backfill outcomes after a restart
+python -m kalshi analyze --lo 0.78 --hi 0.85 --min-edge 0.02 --contracts 10
+python -m examples.kalshi_demo 600      # dry run vs a simulated exchange (no network)
+```
+
+Needs outbound access to `api.elections.kalshi.com` and `api.exchange.coinbase.com`.
+
+**Decision rule:** trade only if the model strategy's CI lower bound beats breakeven **and** model Brier < market Brier. Then size at ≤ ¼ Kelly.
+
+Known model limits: Coinbase ≠ BRTI (basis risk); vol is 60-min realized (no jumps/fat tails); locked-average is estimated from our own 2s samples, not the 1s BRTI prints; fees assume taker at 10 contracts (1-contract orders round the fee up to 2¢).
