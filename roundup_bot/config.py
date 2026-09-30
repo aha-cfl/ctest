@@ -40,7 +40,9 @@ class LadderConfig:
 class RiskConfig:
     leverage: float = 5.0
     max_leverage: float = 10.0
-    margin_fraction_per_trade: float = 0.25   # share of equity posted as margin
+    risk_per_trade_pct: float = 1.0           # equity lost if the initial stop is hit
+    max_risk_per_trade_pct: float = 2.0       # hard ceiling on the above
+    margin_fraction_per_trade: float = 0.25   # cap: max share of equity posted as margin
     maintenance_margin_rate: float = 0.005
     liq_buffer_roe_pct: float = 20.0          # stop must be >= this far above liq
     max_drawdown_pct: float = 50.0            # kill switch from equity peak
@@ -87,6 +89,8 @@ def validate(cfg: Config) -> Config:
         raise ValueError("mode must be 'paper' or 'live'")
     if not 1 <= r.leverage <= r.max_leverage:
         raise ValueError(f"leverage {r.leverage} outside [1, {r.max_leverage}]")
+    if not 0 < r.risk_per_trade_pct <= r.max_risk_per_trade_pct:
+        raise ValueError(f"risk_per_trade_pct {r.risk_per_trade_pct} outside (0, {r.max_risk_per_trade_pct}]")
     if len(lad.levels_pct) != len(lad.close_fractions):
         raise ValueError("ladder.levels_pct and ladder.close_fractions must match in length")
     if sorted(lad.levels_pct) != list(lad.levels_pct) or lad.levels_pct[0] <= 0:

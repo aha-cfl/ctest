@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from .broker import Broker
 from .config import Config
 from .position import Bar, Fill, Position
+from .sizing import size_position
 from .strategy import signal
 
 
@@ -73,11 +74,10 @@ class Engine:
 
     def _enter(self, bar: Bar, side: int) -> None:
         r = self.cfg.risk
-        margin = self.broker.equity() * r.margin_fraction_per_trade
-        notional = margin * r.leverage
-        if notional < r.min_order_notional_usd:
+        size = size_position(self.broker.equity(), bar.close, self.cfg.ladder, r)
+        if size is None:
+            self._record(bar.ts, "skip-too-small", side, 0, bar.close)
             return
-        qty = notional / bar.close
-        px = self.broker.open(side, qty, bar.close, r.leverage)
-        self.pos = Position(side=side, entry=px, qty=qty, leverage=r.leverage, cfg=self.cfg.ladder)
-        self._record(bar.ts, "open", side, qty, px)
+        px = self.broker.open(side, size.qty, bar.close, r.leverage)
+        self.pos = Position(side=side, entry=px, qty=size.qty, leverage=r.leverage, cfg=self.cfg.ladder)
+        self._record(bar.ts, "open", side, size.qty, px)

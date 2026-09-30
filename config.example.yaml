@@ -24,7 +24,9 @@ ladder:                     # all values are ROE % (return on margin), NOT price
 risk:
   leverage: 5
   max_leverage: 10
-  margin_fraction_per_trade: 0.25
+  risk_per_trade_pct: 1.0   # a full stop-out loses 1% of equity (fees included)
+  max_risk_per_trade_pct: 2.0
+  margin_fraction_per_trade: 0.25   # cap on margin posted per trade
   maintenance_margin_rate: 0.005
   liq_buffer_roe_pct: 20
   max_drawdown_pct: 50      # kill switch, deposit-adjusted
