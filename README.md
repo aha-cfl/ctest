@@ -41,6 +41,7 @@ pip install -r requirements.txt
 cp config.example.yaml config.yaml
 python -m roundup_bot --config config.yaml roundup --csv txns.csv        # or Plaid via env vars
 python -m roundup_bot --config config.yaml backtest --prices bars.csv --cash 25 --monthly-deposit 30
+python -m examples.walkthrough                                            # step-by-step demo of sizing + ladder
 python -m roundup_bot --config config.yaml live                          # after paper validation
 ```
 Plaid env: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ACCESS_TOKEN`, `PLAID_ENV`. Exchange env: `EXCHANGE_API_KEY`, `EXCHANGE_API_SECRET`.
