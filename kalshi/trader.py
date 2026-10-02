@@ -6,6 +6,8 @@ Rules:
 """
 from __future__ import annotations
 
+import json
+import os
 import time
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
@@ -44,6 +46,8 @@ class Trader:
     last_status: str = ""
     in_window: bool = False
     last_skip: tuple[str, float] = ("", -1e18)
+    now: float = 0.0
+    cur: dict = field(default_factory=dict)   # live view of the market being evaluated
 
     @property
     def trades_path(self) -> Path:
@@ -53,12 +57,37 @@ class Trader:
     def done(self) -> bool:
         return len(self.settled) >= self.max_trades and not self.open_trades
 
-    def _say(self, msg: str) -> None:
+    def _emit(self, kind: str, msg: str) -> None:
+        """Console + events.jsonl (the dashboard's activity feed)."""
+        self.log(msg)
+        append_jsonl(self.out_dir / "events.jsonl", {"ts": self.now, "kind": kind, "msg": msg})
+
+    def _say(self, msg: str, kind: str = "info") -> None:
+        self.cur["msg"] = msg
         if msg != self.last_status:
-            self.log(msg)
+            self._emit(kind, msg)
             self.last_status = msg
 
+    def _write_status(self) -> None:
+        status = {"ts": self.now, "mode": "paper", "rule": asdict(self.rule), "max_trades": self.max_trades,
+                  "settled": len(self.settled), "open": len(self.open_trades), "done": self.done,
+                  "in_window": self.in_window, **self.cur}
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.out_dir / "status.json.tmp"
+        tmp.write_text(json.dumps(status))
+        os.replace(tmp, self.out_dir / "status.json")
+
     def tick(self, now: float) -> None:
+        self.now, self.cur = now, {"msg": self.cur.get("msg", "")}
+        try:
+            self._tick(now)
+        finally:
+            if self.done:
+                pnl = sum(r["pnl"] for r in self.settled)
+                self.cur = {"msg": f"Finished: {len(self.settled)} trade(s) settled, P&L ${pnl:+.2f}"}
+            self._write_status()
+
+    def _tick(self, now: float) -> None:
         self.in_window = False
         self._settle()
         if len(self.traded_tickers) >= self.max_trades:
@@ -73,6 +102,7 @@ class Trader:
             return
         m = markets[0]
         t_rem = m.close_ts - now
+        self.cur.update(ticker=m.ticker, close_ts=m.close_ts, strike=m.strike, t_rem=round(t_rem, 1))
         if m.ticker in self.traded_tickers or m.strike is None:
             return
         if t_rem > self.rule.max_t_rem:
@@ -89,6 +119,7 @@ class Trader:
             self.sigma, self.sigma_ts = sigma_per_second(self.spot_src.closes_1m(60)), now
         fy = fair_yes(spot, m.strike, t_rem, self.sigma, sum(locked) / len(locked) if locked else None)
         book = self.kalshi.book(m.ticker)
+        self.cur.update(spot=spot, fair_yes=round(fy, 4), yes_ask=book.yes_ask, no_ask=book.no_ask)
 
         sides = [("yes", book.yes_ask, fy, book.no_bid_size), ("no", book.no_ask, 1 - fy, book.yes_bid_size)]
         notes = []
@@ -109,7 +140,7 @@ class Trader:
             return
         self.last_skip = (m.ticker, now)
         self._say(f"{m.ticker} t-{t_rem:5.1f}s spot {spot:,.2f} vs strike {m.strike:,.2f} | "
-                  f"fair YES {fy:.3f} | skip: {'; '.join(notes) or 'empty book'}")
+                  f"fair YES {fy:.3f} | skip: {'; '.join(notes) or 'empty book'}", kind="skip")
 
     def _buy(self, now, m, side, ask, fair, edge, depth, spot, t_rem) -> None:
         fill = self.executor.buy(m.ticker, side, ask, self.rule.contracts, depth)
@@ -122,7 +153,8 @@ class Trader:
         self.open_trades[m.ticker] = trade
         self.traded_tickers.add(m.ticker)
         append_jsonl(self.trades_path, trade)
-        self.log(f">>> BUY {side.upper()} x{fill.count} {m.ticker} @ {ask:.2f} (fee ${fill.fee:.2f}, "
+        self.last_status = ""
+        self._emit("buy", f">>> BUY {side.upper()} x{fill.count} {m.ticker} @ {ask:.2f} (fee ${fill.fee:.2f}, "
                  f"cost ${fill.cost:.2f}) | fair {fair:.3f} edge {edge:+.3f} | t-{t_rem:.0f}s "
                  f"spot {spot:,.2f} strike {m.strike:,.2f} | order {fill.order_id}")
 
@@ -139,7 +171,7 @@ class Trader:
             append_jsonl(self.trades_path, row)
             self.settled.append(row)
             del self.open_trades[ticker]
-            self.log(f"<<< SETTLED {ticker}: result {m.result.upper()} -> {'WIN' if won else 'LOSS'} "
+            self._emit("win" if won else "loss", f"<<< SETTLED {ticker}: result {m.result.upper()} -> {'WIN' if won else 'LOSS'} "
                      f"payout ${payout:.2f} | P&L ${pnl:+.2f} ({row['return_pct']:+.1f}%)")
 
     def run(self, poll_s: float = 2.0, idle_s: float = 5.0) -> None:
@@ -148,7 +180,7 @@ class Trader:
             try:
                 self.tick(time.time())
             except Exception as e:  # keep running through network blips
-                self.log(f"[trader] error: {e!r}")
+                self._emit("error", f"[trader] error: {e!r}")
             time.sleep(poll_s if self.in_window or self.open_trades else idle_s)
         total = sum(r["pnl"] for r in self.settled)
         self.log(f"[trader] done: {len(self.settled)} trade(s), total P&L ${total:+.2f}")

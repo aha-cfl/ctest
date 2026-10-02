@@ -1,0 +1,357 @@
+<title>BTC 15m Paper Desk</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: desk header -> KPI strip -> [live market | P&L curve] -> trade blotter -> activity tape.
+   Cool ledger greys with a cobalt accent; win/loss/warn are semantic, separate from the accent. */
+:root {
+  --bg: #eef1f5; --surface: #ffffff; --surface-2: #f6f8fb; --line: #d8dee8;
+  --fg: #16202e; --muted: #5d6b7e; --faint: #8a96a8;
+  --accent: #2456c9; --accent-soft: #dfe8fb;
+  --win: #18805a; --win-soft: #dcf1e7; --loss: #c0392b; --loss-soft: #f8e1de;
+  --warn: #a8670a; --warn-soft: #f9ecd3; --band: rgba(36, 86, 201, .12);
+  --f-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e131a; --surface: #151c26; --surface-2: #1b2430; --line: #2a3443;
+  --fg: #e6ebf2; --muted: #9aa6b8; --faint: #6c788b;
+  --accent: #7ea2ff; --accent-soft: #1f2d4d;
+  --win: #4cc790; --win-soft: #15322a; --loss: #ff7a6b; --loss-soft: #3a1f1d;
+  --warn: #f0b64f; --warn-soft: #3a2c12; --band: rgba(126, 162, 255, .16);
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0e131a; --surface: #151c26; --surface-2: #1b2430; --line: #2a3443;
+  --fg: #e6ebf2; --muted: #9aa6b8; --faint: #6c788b;
+  --accent: #7ea2ff; --accent-soft: #1f2d4d;
+  --win: #4cc790; --win-soft: #15322a; --loss: #ff7a6b; --loss-soft: #3a1f1d;
+  --warn: #f0b64f; --warn-soft: #3a2c12; --band: rgba(126, 162, 255, .16);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--f-body); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 40px; display: grid; gap: 16px; }
+h1, h2 { font-family: var(--f-display); margin: 0; text-wrap: balance; }
+h1 { font-size: 1.55rem; font-weight: 800; letter-spacing: -.01em; }
+h2 { font-size: .78rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.num { font-family: var(--f-data); font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.title { display: grid; gap: 2px; min-width: 0; }
+.sub { color: var(--muted); font-size: .85rem; }
+.pills { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+  font: 500 .74rem/1.4 var(--f-data); letter-spacing: .04em; background: var(--surface); border: 1px solid var(--line); color: var(--muted); }
+.pill.sim { background: var(--loss-soft); color: var(--loss); border-color: transparent; font-weight: 600; }
+.pill.paper { background: var(--warn-soft); color: var(--warn); border-color: transparent; font-weight: 600; }
+.pill.live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--win); box-shadow: 0 0 0 3px var(--win-soft); }
+.pill.stale .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+@media (prefers-reduced-motion: no-preference) { .pill.live .dot { animation: pulse 1.6s ease-in-out infinite; } }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.kpi { background: var(--surface); padding: 14px 16px; display: grid; gap: 4px; min-width: 0; }
+.kpi .label { font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.kpi .value { font: 500 1.5rem/1.15 var(--f-data); font-variant-numeric: tabular-nums; }
+.kpi .note { font-size: .78rem; color: var(--muted); }
+.pos { color: var(--win); } .neg { color: var(--loss); }
+.wr-bar { position: relative; height: 6px; border-radius: 3px; background: var(--surface-2); margin-top: 4px; }
+.wr-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--accent); }
+.wr-bar b { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--fg); }
+
+.row2 { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+
+.mkt { display: grid; gap: 12px; }
+.mkt-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ticker { font: 500 1rem var(--f-data); }
+.clock { font: 500 1.9rem/1 var(--f-data); font-variant-numeric: tabular-nums; }
+.clock small { font-size: .8rem; color: var(--muted); margin-left: 4px; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fact { background: var(--surface-2); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.fact .k { font-size: .7rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.fact .v { font: 500 .98rem var(--f-data); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.gauge svg { width: 100%; height: auto; display: block; }
+.decision { font: .82rem/1.45 var(--f-data); color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; }
+.empty { color: var(--muted); font-size: .9rem; padding: 18px 0; }
+
+.chart svg { width: 100%; height: auto; display: block; }
+
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .84rem; min-width: 760px; }
+th { text-align: left; font: 600 .7rem var(--f-body); text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+  padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td.num, th.num { text-align: right; }
+tr:last-child td { border-bottom: 0; }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font: 600 .72rem/1.5 var(--f-data); letter-spacing: .04em; }
+.tag.win { background: var(--win-soft); color: var(--win); }
+.tag.loss { background: var(--loss-soft); color: var(--loss); }
+.tag.open { background: var(--accent-soft); color: var(--accent); }
+.tag.yes { background: var(--surface-2); color: var(--fg); }
+.tag.no { background: var(--surface-2); color: var(--fg); }
+
+.feed { list-style: none; margin: 0; padding: 0; display: grid; max-height: 360px; overflow-y: auto; }
+.feed li { display: grid; grid-template-columns: 76px 64px minmax(0, 1fr); gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--line); font-size: .8rem; align-items: baseline; }
+.feed li:last-child { border-bottom: 0; }
+.feed time { font-family: var(--f-data); color: var(--faint); }
+.feed .msg { font-family: var(--f-data); overflow-wrap: anywhere; color: var(--muted); }
+.feed .k { font: 600 .68rem var(--f-data); text-transform: uppercase; letter-spacing: .06em; }
+.k-buy { color: var(--accent); } .k-win { color: var(--win); } .k-loss { color: var(--loss); }
+.k-error { color: var(--loss); } .k-skip, .k-info { color: var(--faint); }
+.feed li.hi .msg { color: var(--fg); }
+
+footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
+
+@media (max-width: 900px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpi:last-child { grid-column: 1 / -1; }
+  .row2 { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .feed li { grid-template-columns: 64px minmax(0, 1fr); }
+  .feed li .k { display: none; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="title">
+      <h1>BTC 15m Paper Desk</h1>
+      <div class="sub">Kalshi KXBTC15M up/down · buys in the final 2 minutes · settles on the 60s CF Benchmarks BRTI average</div>
+    </div>
+    <div class="pills">
+      <span class="pill sim" id="label-pill" hidden></span>
+      <span class="pill paper">PAPER · NO REAL ORDERS</span>
+      <span class="pill" id="rule-pill">rule —</span>
+      <span class="pill stale" id="conn"><span class="dot"></span><span id="conn-text">loading</span></span>
+    </div>
+  </header>
+
+  <section class="kpis" aria-label="Summary">
+    <div class="kpi"><span class="label">Total P&amp;L</span><span class="value" id="k-pnl">—</span><span class="note" id="k-roi">—</span></div>
+    <div class="kpi"><span class="label">Win rate</span><span class="value" id="k-wr">—</span>
+      <div class="wr-bar" title="bar = win rate, tick = breakeven"><i id="k-wr-bar" style="width:0"></i><b id="k-be-tick" style="left:0"></b></div>
+      <span class="note" id="k-be">breakeven —</span></div>
+    <div class="kpi"><span class="label">Trades</span><span class="value" id="k-n">—</span><span class="note" id="k-wl">—</span></div>
+    <div class="kpi"><span class="label">Avg entry</span><span class="value" id="k-px">—</span><span class="note">per contract, before fee</span></div>
+    <div class="kpi"><span class="label">Avg model edge</span><span class="value" id="k-edge">—</span><span class="note">fair − ask − fee at entry</span></div>
+  </section>
+
+  <div class="row2">
+    <section class="panel" aria-label="Current market">
+      <div class="panel-head"><h2>Now</h2><span class="sub" id="now-phase">—</span></div>
+      <div id="mkt" class="mkt"><div class="empty">Waiting for the trader's first status update.</div></div>
+    </section>
+    <section class="panel" aria-label="Cumulative P&L">
+      <div class="panel-head"><h2>Cumulative P&amp;L</h2><span class="sub">per settled trade · dot = win/loss</span></div>
+      <div class="chart" id="chart"><div class="empty">No settled trades yet.</div></div>
+    </section>
+  </div>
+
+  <section class="panel" aria-label="Trades">
+    <div class="panel-head"><h2>Executions</h2><span class="sub" id="trade-count">—</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Entry (UTC)</th><th>Market</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fee</th>
+          <th class="num">Fair</th><th class="num">Edge</th><th class="num">t-left</th><th>Result</th><th class="num">P&amp;L</th><th>Order</th>
+        </tr></thead>
+        <tbody id="trades"><tr><td colspan="12" class="empty">No executions yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Activity">
+    <div class="panel-head"><h2>Activity</h2><span class="sub">newest first</span></div>
+    <ul class="feed" id="feed"><li><span></span><span></span><span class="msg">No activity yet.</span></li></ul>
+  </section>
+
+  <footer>
+    Paper fills are simulated at the displayed ask, capped by displayed size, with Kalshi's taker fee (1 contract rounds up to 2¢).
+    Win rate needs to beat breakeven over hundreds of markets before it means anything; a handful of trades is noise.
+  </footer>
+</div>
+
+<script>
+const SNAPSHOT = /*__STATE__*/null;
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const cents = (p) => p == null ? "—" : `${Math.round(p * 100)}¢`;
+const usd = (v, sign = true) => v == null ? "—" : `${sign && v > 0 ? "+" : v < 0 ? "−" : ""}$${Math.abs(v).toFixed(2)}`;
+const pct = (v, d = 1) => v == null ? "—" : `${(v * 100).toFixed(d)}%`;
+const hms = (ts) => ts ? new Date(ts * 1000).toISOString().slice(11, 19) : "—";
+const dt = (ts) => ts ? new Date(ts * 1000).toISOString().slice(5, 16).replace("T", " ") : "—";
+const cls = (v) => v > 0 ? "pos" : v < 0 ? "neg" : "";
+
+function renderKpis(s) {
+  $("k-pnl").textContent = usd(s.pnl); $("k-pnl").className = "value " + cls(s.pnl);
+  $("k-roi").textContent = s.roi == null ? "on $0 staked" : `${s.roi >= 0 ? "+" : ""}${(s.roi * 100).toFixed(1)}% on $${s.staked.toFixed(2)} staked`;
+  $("k-wr").textContent = pct(s.win_rate);
+  $("k-be").textContent = `breakeven ${pct(s.breakeven)}`;
+  $("k-wr").className = "value " + (s.win_rate == null ? "" : s.win_rate >= s.breakeven ? "pos" : "neg");
+  $("k-wr-bar").style.width = `${(s.win_rate || 0) * 100}%`;
+  $("k-be-tick").style.left = `calc(${(s.breakeven || 0) * 100}% - 1px)`;
+  $("k-n").textContent = s.settled;
+  $("k-wl").textContent = `${s.wins} won · ${s.losses} lost${s.open ? ` · ${s.open} open` : ""}`;
+  $("k-px").textContent = cents(s.avg_price);
+  $("k-edge").textContent = s.avg_edge == null ? "—" : `${s.avg_edge >= 0 ? "+" : "−"}${Math.abs(s.avg_edge * 100).toFixed(1)}¢`;
+  $("k-edge").className = "value " + cls(s.avg_edge);
+}
+
+function gauge(st) {
+  // 0..100¢ scale. Shaded = buy band; ticks = YES ask, NO ask (as YES-equivalent), model fair.
+  const W = 560, H = 86, L = 14, R = W - 14, x = (p) => L + (R - L) * p;
+  const lo = st.rule?.lo ?? .78, hi = st.rule?.hi ?? .85;
+  const parts = [];
+  parts.push(`<rect x="${x(lo)}" y="18" width="${x(hi) - x(lo)}" height="26" fill="var(--band)"/>`);
+  parts.push(`<rect x="${x(1 - hi)}" y="18" width="${x(1 - lo) - x(1 - hi)}" height="26" fill="var(--band)"/>`);
+  parts.push(`<line x1="${L}" y1="44" x2="${R}" y2="44" stroke="var(--line)" stroke-width="2"/>`);
+  for (const t of [0, .25, .5, .75, 1]) {
+    parts.push(`<line x1="${x(t)}" y1="44" x2="${x(t)}" y2="50" stroke="var(--faint)"/>`);
+    parts.push(`<text x="${x(t)}" y="64" text-anchor="middle" font-size="11" fill="var(--faint)" font-family="IBM Plex Mono, monospace">${t * 100}¢</text>`);
+  }
+  const mark = (p, color, label, up) => p == null ? "" :
+    `<line x1="${x(p)}" y1="${up ? 10 : 18}" x2="${x(p)}" y2="44" stroke="${color}" stroke-width="2.5"/>` +
+    `<text x="${Math.min(Math.max(x(p), 40), W - 40)}" y="${up ? 9 : 80}" text-anchor="middle" font-size="11" fill="${color}" font-family="IBM Plex Mono, monospace">${label}</text>`;
+  parts.push(mark(st.yes_ask, "var(--accent)", `YES ask ${cents(st.yes_ask)}`, true));
+  parts.push(mark(st.fair_yes, "var(--fg)", `fair ${cents(st.fair_yes)}`, false));
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="YES ask ${cents(st.yes_ask)}, model fair ${cents(st.fair_yes)}">${parts.join("")}</svg>`;
+}
+
+function renderNow(st, live) {
+  if (!st) return;
+  $("rule-pill").textContent = `rule ${st.rule.mode} · ${cents(st.rule.lo)}–${cents(st.rule.hi)}${st.rule.mode === "model" ? ` · edge ≥ ${cents(st.rule.min_edge)}` : ""}`;
+  $("now-phase").textContent = st.done ? "finished" : st.open ? "position open" : st.in_window ? "in decision window" : "waiting";
+  if (!st.ticker) { $("mkt").innerHTML = `<div class="decision">${esc(st.msg || "No open market.")}</div>`; return; }
+  let tRem = st.t_rem;
+  if (live && st.close_ts) tRem = Math.max(0, st.close_ts - Date.now() / 1000);
+  const mm = Math.floor(tRem / 60), ss = Math.floor(tRem % 60);
+  const diff = st.spot != null && st.strike != null ? st.spot - st.strike : null;
+  $("mkt").innerHTML = `
+    <div class="mkt-top">
+      <span class="ticker">${esc(st.ticker)}</span>
+      <span class="clock">${mm}:${String(ss).padStart(2, "0")}<small>to close</small></span>
+    </div>
+    <div class="facts">
+      <div class="fact"><div class="k">Strike</div><div class="v">${st.strike != null ? st.strike.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—"}</div></div>
+      <div class="fact"><div class="k">BTC spot</div><div class="v">${st.spot != null ? st.spot.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "—"}</div></div>
+      <div class="fact"><div class="k">Spot − strike</div><div class="v ${cls(diff)}">${diff == null ? "—" : (diff >= 0 ? "+" : "−") + "$" + Math.abs(diff).toFixed(2)}</div></div>
+      <div class="fact"><div class="k">Fair YES</div><div class="v">${cents(st.fair_yes)}</div></div>
+      <div class="fact"><div class="k">YES ask</div><div class="v">${cents(st.yes_ask)}</div></div>
+      <div class="fact"><div class="k">NO ask</div><div class="v">${cents(st.no_ask)}</div></div>
+    </div>
+    ${st.fair_yes != null ? `<div class="gauge">${gauge(st)}</div>` : ""}
+    <div class="decision">${esc(st.msg)}</div>`;
+}
+
+function renderChart(curve) {
+  if (!curve.length) return;
+  const W = 640, H = 240, L = 54, R = 16, T = 14, B = 30;
+  const ys = curve.map((c) => c.pnl).concat([0]);
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  const pad = Math.max((hi - lo) * .12, .05); lo -= pad; hi += pad;
+  const n = curve.length;
+  const X = (i) => n === 1 ? L + (W - L - R) / 2 : L + (W - L - R) * i / (n - 1);
+  const Y = (v) => T + (H - T - B) * (hi - v) / (hi - lo);
+  const step = niceStep((hi - lo) / 4);
+  const g = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+    g.push(`<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="1"/>`);
+    g.push(`<text x="${L - 8}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="var(--faint)" font-family="IBM Plex Mono, monospace">${v < 0 ? "−" : ""}$${Math.abs(v).toFixed(2)}</text>`);
+  }
+  g.push(`<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"/>`);
+  const pts = curve.map((c, i) => [X(i), Y(c.pnl)]);
+  const path = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("");
+  const last = curve[n - 1].pnl, color = last >= 0 ? "var(--win)" : "var(--loss)";
+  const area = `${path}L${pts[n - 1][0].toFixed(1)},${Y(0).toFixed(1)}L${pts[0][0].toFixed(1)},${Y(0).toFixed(1)}Z`;
+  const dots = curve.map((c, i) => `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="${n > 60 ? 2 : 3.2}" fill="${c.won ? "var(--win)" : "var(--loss)"}"/>`).join("");
+  const xl = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i)
+    .map((i) => `<text x="${X(i)}" y="${H - 8}" text-anchor="middle" font-size="11" fill="var(--faint)" font-family="IBM Plex Mono, monospace">#${i + 1}</text>`).join("");
+  $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative P&L after ${n} trades: ${usd(last)}">
+    ${g.join("")}
+    <path d="${area}" fill="${color}" opacity=".12"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round"/>
+    ${dots}
+    <circle cx="${pts[n - 1][0]}" cy="${pts[n - 1][1]}" r="6" fill="none" stroke="${color}" stroke-width="2"/>
+    ${xl}
+  </svg>`;
+}
+function niceStep(raw) {
+  const p = Math.pow(10, Math.floor(Math.log10(raw || 1))), m = raw / p;
+  return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
+}
+
+function renderTrades(trades) {
+  $("trade-count").textContent = `${trades.length} execution${trades.length === 1 ? "" : "s"}`;
+  if (!trades.length) return;
+  $("trades").innerHTML = trades.map((t) => {
+    const res = t.status === "settled" ? `<span class="tag ${t.won ? "win" : "loss"}">${t.won ? "WIN" : "LOSS"} · ${t.result.toUpperCase()}</span>` : `<span class="tag open">OPEN</span>`;
+    return `<tr>
+      <td class="num" style="text-align:left">${dt(t.ts)}</td>
+      <td class="num" style="text-align:left">${esc(t.ticker)}</td>
+      <td><span class="tag ${t.side}">${t.side.toUpperCase()}</span></td>
+      <td class="num">${t.count}</td>
+      <td class="num">${cents(t.price)}</td>
+      <td class="num">${cents(t.fee)}</td>
+      <td class="num">${cents(t.fair)}</td>
+      <td class="num ${cls(t.edge)}">${t.edge >= 0 ? "+" : "−"}${Math.abs(t.edge * 100).toFixed(1)}¢</td>
+      <td class="num">${Math.round(t.t_rem)}s</td>
+      <td>${res}</td>
+      <td class="num ${cls(t.pnl)}">${t.status === "settled" ? usd(t.pnl) : "—"}</td>
+      <td class="num muted" style="text-align:left">${esc(t.order_id)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderFeed(events) {
+  if (!events.length) return;
+  $("feed").innerHTML = events.map((e) => `<li class="${["buy", "win", "loss", "error"].includes(e.kind) ? "hi" : ""}">
+    <time>${hms(e.ts)}</time><span class="k k-${esc(e.kind)}">${esc(e.kind)}</span><span class="msg">${esc(e.msg)}</span></li>`).join("");
+}
+
+function render(state, live) {
+  renderKpis(state.summary);
+  renderNow(state.status, live);
+  renderChart(state.curve);
+  renderTrades(state.trades);
+  renderFeed(state.events);
+}
+
+function setConn(ok, text) {
+  $("conn").className = "pill " + (ok ? "live" : "stale");
+  $("conn-text").textContent = text;
+}
+
+if (SNAPSHOT) {
+  if (SNAPSHOT.label) { $("label-pill").textContent = SNAPSHOT.label.toUpperCase(); $("label-pill").hidden = false; }
+  render(SNAPSHOT, false);
+  setConn(false, `snapshot · ${dt(SNAPSHOT.status?.ts || SNAPSHOT.generated)} UTC`);
+} else {
+  let last = null;
+  const poll = async () => {
+    try {
+      const r = await fetch("api/state", { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status);
+      last = await r.json();
+      render(last, true);
+      const age = Date.now() / 1000 - (last.status?.ts || 0);
+      setConn(age < 30, age < 30 ? "live" : `trader quiet ${Math.round(age)}s`);
+    } catch (e) {
+      setConn(false, "dashboard offline");
+    }
+  };
+  poll();
+  setInterval(poll, 2000);
+  setInterval(() => last && renderNow(last.status, true), 1000);
+}
+</script>

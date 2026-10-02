@@ -1,4 +1,4 @@
-"""python -m kalshi record | analyze | resolve | paper-trade"""
+"""python -m kalshi record | analyze | resolve | paper-trade | dashboard | export"""
 import argparse
 from pathlib import Path
 
@@ -21,6 +21,13 @@ def main(argv=None):
     a.add_argument("--contracts", type=int, default=10)
     a.add_argument("--max-t-rem", type=float, default=120)
     sub.add_parser("resolve", help="fetch results for recorded markets missing an outcome")
+    d = sub.add_parser("dashboard", help="serve the live dashboard (read-only)")
+    d.add_argument("--host", default="127.0.0.1", help="keep 127.0.0.1 and use an SSH tunnel; there is no login")
+    d.add_argument("--port", type=int, default=8080)
+    e = sub.add_parser("export", help="write a self-contained HTML snapshot of the dashboard")
+    e.add_argument("out")
+    e.add_argument("--label", help="banner shown on the snapshot, e.g. 'Simulated exchange'")
+    e.add_argument("--fragment", action="store_true", help="omit <!doctype>/<html> wrapper")
     t = sub.add_parser("paper-trade", help="paper: decide, simulate buy at ask, wait for real settlement")
     t.add_argument("--rule", choices=["model", "favorite"], default="model")
     t.add_argument("--max-trades", type=int, default=1)
@@ -34,6 +41,12 @@ def main(argv=None):
 
     if args.cmd == "record":
         Recorder(Kalshi(), Coinbase(), data, window_s=args.window).run(poll_s=args.poll, idle_poll_s=5.0)
+    elif args.cmd == "dashboard":
+        from .dashboard import serve
+        serve(data, args.host, args.port)
+    elif args.cmd == "export":
+        from .dashboard import export
+        print(export(data, Path(args.out), not args.fragment, args.label))
     elif args.cmd == "paper-trade":
         from .execution import PaperExecutor
         from .trader import Rule, Trader

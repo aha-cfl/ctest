@@ -35,8 +35,9 @@ PY
 echo "==> systemd units"
 install -m 644 "$REPO/deploy/kalshi-recorder.service" /etc/systemd/system/
 install -m 644 "$REPO/deploy/kalshi-paper-trader.service" /etc/systemd/system/
+install -m 644 "$REPO/deploy/kalshi-dashboard.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now kalshi-recorder.service
+systemctl enable --now kalshi-recorder.service kalshi-dashboard.service
 
 if [[ "${1:-}" == "--start-paper-trade" ]]; then
   systemctl start kalshi-paper-trader.service
@@ -48,6 +49,7 @@ Installed.
   Recorder (always on):   journalctl -fu kalshi-recorder
   One paper trade:        sudo systemctl start kalshi-paper-trader && journalctl -fu kalshi-paper-trader
   Trade log:              sudo cat $DATA/trades.jsonl
+  Dashboard:              on your laptop: ssh -L 8080:localhost:8080 you@this-server, then open http://localhost:8080
   Edge report (any time): cd $APP && sudo -u kalshi .venv/bin/python -m kalshi --data $DATA analyze
   Settings:               $ETC/paper-trader.env
 MSG

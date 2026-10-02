@@ -102,3 +102,14 @@ sudo cat /var/lib/kalshi/trades.jsonl
 | `kalshi-paper-trader.service` | Runs until `MAX_TRADES` settle, then exits 0 and stays stopped; restarts only on crash |
 
 Tune via `/etc/kalshi/paper-trader.env` (`RULE`, `MAX_TRADES`, `CONTRACTS`, `MIN_EDGE`). Both units run as an unprivileged `kalshi` user with a read-only filesystem except the data dir.
+
+## Dashboard
+Read-only view of the trader: summary numbers, the market being evaluated (countdown, spot vs strike, fair vs ask on a 0–100¢ gauge), cumulative P&L, every execution, and the decision log. It reads `status.json`, `trades.jsonl` and `events.jsonl` from the data dir.
+
+```bash
+python -m kalshi --data /var/lib/kalshi dashboard            # http://127.0.0.1:8080, refreshes every 2s
+python -m kalshi --data DIR export desk.html                 # static snapshot, no server
+python -m examples.kalshi_trade_demo --favorite --max-trades 25 --data /tmp/desk --quiet
+python -m kalshi --data /tmp/desk dashboard                  # browse the simulated run
+```
+`install.sh` also enables `kalshi-dashboard.service`. It binds to localhost only (no login), so view it from your laptop with `ssh -L 8080:localhost:8080 you@server` and open http://localhost:8080.
