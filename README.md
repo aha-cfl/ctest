@@ -78,3 +78,27 @@ Needs outbound access to `api.elections.kalshi.com` and `api.exchange.coinbase.c
 **Decision rule:** trade only if the model strategy's CI lower bound beats breakeven **and** model Brier < market Brier. Then size at ≤ ¼ Kelly.
 
 Known model limits: Coinbase ≠ BRTI (basis risk); vol is 60-min realized (no jumps/fat tails); locked-average is estimated from our own 2s samples, not the 1s BRTI prints; fees assume taker at 10 contracts (1-contract orders round the fee up to 2¢).
+
+## Paper trading (one trade, end to end)
+`kalshi/trader.py` runs the full loop: wait for the final 120s → compute fair value → buy if the rule passes → wait for Kalshi's **real** settlement → log P&L to `trades.jsonl` → exit after `--max-trades`. Fills are simulated at the quoted ask (`PaperExecutor`), capped by displayed depth, with the real fee (1 contract rounds up to 2¢). **No orders are sent to Kalshi.**
+
+```bash
+python -m kalshi paper-trade --max-trades 1                 # model rule: may wait many markets for an edge
+python -m kalshi paper-trade --max-trades 1 --rule favorite # blind 78-85c favorite: trades within ~1 market
+python -m examples.kalshi_trade_demo                        # same trader vs simulated exchange, no network
+```
+
+## Deploy on a server (systemd)
+```bash
+git clone <this repo> && cd ctest
+sudo ./deploy/install.sh                       # installs to /opt/kalshi, data in /var/lib/kalshi, starts recorder
+sudo systemctl start kalshi-paper-trader       # one paper trade, then the service stops itself
+journalctl -fu kalshi-paper-trader             # watch it live
+sudo cat /var/lib/kalshi/trades.jsonl
+```
+| Unit | Behavior |
+|---|---|
+| `kalshi-recorder.service` | Always on, restarts on failure, enabled at boot |
+| `kalshi-paper-trader.service` | Runs until `MAX_TRADES` settle, then exits 0 and stays stopped; restarts only on crash |
+
+Tune via `/etc/kalshi/paper-trader.env` (`RULE`, `MAX_TRADES`, `CONTRACTS`, `MIN_EDGE`). Both units run as an unprivileged `kalshi` user with a read-only filesystem except the data dir.

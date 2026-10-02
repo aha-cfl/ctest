@@ -1,0 +1,24 @@
+[Unit]
+Description=Kalshi KXBTC15M paper trader (simulated fills, real settlement; exits after N trades)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kalshi
+WorkingDirectory=/opt/kalshi
+EnvironmentFile=-/etc/kalshi/paper-trader.env
+ExecStart=/opt/kalshi/.venv/bin/python -m kalshi --data /var/lib/kalshi paper-trade \
+    --rule ${RULE} --max-trades ${MAX_TRADES} --contracts ${CONTRACTS} --min-edge ${MIN_EDGE}
+# Exit 0 after the last trade settles -> stays stopped. Crashes/network loss -> restart.
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1 RULE=model MAX_TRADES=1 CONTRACTS=1 MIN_EDGE=0.02
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/kalshi
+
+[Install]
+WantedBy=multi-user.target
