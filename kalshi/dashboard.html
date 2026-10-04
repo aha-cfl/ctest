@@ -86,7 +86,7 @@ header { display: flex; flex-wrap: wrap; align-items: center; justify-content: s
 .chart svg { width: 100%; height: auto; display: block; }
 
 .table-wrap { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: .84rem; min-width: 760px; }
+table { width: 100%; border-collapse: collapse; font-size: .84rem; min-width: 940px; }
 th { text-align: left; font: 600 .7rem var(--f-body); text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
   padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 td { padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -110,6 +110,33 @@ tr:last-child td { border-bottom: 0; }
 .feed li.hi .msg { color: var(--fg); }
 
 footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
+
+.signal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; border-radius: var(--r);
+  background: var(--accent-soft); border: 1px solid var(--accent); }
+.signal .what { font: 700 1.15rem var(--f-data); color: var(--accent); }
+.signal .meta { font: .85rem var(--f-data); color: var(--muted); }
+.signal.old { background: var(--surface); border-color: var(--line); }
+.signal.old .what { color: var(--fg); }
+
+.row3 { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; }
+.gate-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.verdict { font: 700 .8rem var(--f-data); letter-spacing: .06em; padding: 3px 10px; border-radius: 999px; }
+.verdict.go { background: var(--win-soft); color: var(--win); }
+.verdict.nogo { background: var(--loss-soft); color: var(--loss); }
+.checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.checks li { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: .85rem; }
+.checks .mark { font: 700 .9rem var(--f-data); }
+.checks .ok .mark { color: var(--win); } .checks .no .mark { color: var(--loss); }
+.checks .val { font: .8rem var(--f-data); color: var(--muted); text-align: right; }
+.prog { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.prog i { display: block; height: 100%; background: var(--accent); }
+.riskline { font: .82rem var(--f-data); color: var(--muted); }
+.tally { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.tally li { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; align-items: center; font-size: .84rem; }
+.tally .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
+.tally .bar i { display: block; height: 100%; background: var(--faint); }
+.tally .n { font-family: var(--f-data); text-align: right; color: var(--muted); }
+@media (max-width: 900px) { .row3 { grid-template-columns: minmax(0, 1fr); } }
 
 @media (max-width: 900px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -137,6 +164,8 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
     </div>
   </header>
 
+  <section class="signal old" id="signal" hidden aria-live="polite"></section>
+
   <section class="kpis" aria-label="Summary">
     <div class="kpi"><span class="label">Total P&amp;L</span><span class="value" id="k-pnl">—</span><span class="note" id="k-roi">—</span></div>
     <div class="kpi"><span class="label">Win rate</span><span class="value" id="k-wr">—</span>
@@ -158,15 +187,28 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
     </section>
   </div>
 
+  <div class="row3">
+    <section class="panel" aria-label="Real-money gate">
+      <div class="panel-head"><h2>Real-money gate</h2><span id="gate-verdict" class="verdict nogo">NO-GO</span></div>
+      <div class="prog" title="settled trades toward 200"><i id="gate-prog" style="width:0"></i></div>
+      <ul class="checks" id="gate-checks"><li><span></span><span class="muted">Waiting for settled trades.</span><span></span></li></ul>
+      <div class="riskline" id="riskline"></div>
+    </section>
+    <section class="panel" aria-label="Why trades were skipped">
+      <div class="panel-head"><h2>Why it skipped</h2><span class="sub">first blocking reason per check</span></div>
+      <ul class="tally" id="tally"><li><span class="muted">No skips yet.</span><span></span></li></ul>
+    </section>
+  </div>
+
   <section class="panel" aria-label="Trades">
     <div class="panel-head"><h2>Executions</h2><span class="sub" id="trade-count">—</span></div>
     <div class="table-wrap">
       <table>
         <thead><tr>
           <th>Entry (UTC)</th><th>Market</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fee</th>
-          <th class="num">Fair</th><th class="num">Edge</th><th class="num">t-left</th><th>Result</th><th class="num">P&amp;L</th><th>Order</th>
+          <th class="num">Fair</th><th class="num">Edge</th><th class="num">t-left</th><th class="num">Gap</th><th class="num">Vol ×</th><th>Exec</th><th>Result</th><th class="num">P&amp;L</th><th>Order</th>
         </tr></thead>
-        <tbody id="trades"><tr><td colspan="12" class="empty">No executions yet.</td></tr></tbody>
+        <tbody id="trades"><tr><td colspan="15" class="empty">No executions yet.</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -177,7 +219,7 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
   </section>
 
   <footer>
-    Paper fills are simulated at the displayed ask, capped by displayed size, with Kalshi's taker fee (1 contract rounds up to 2¢).
+    Paper fills: taker fills at the displayed ask (capped by displayed size, taker fee); maker bids fill only when a later ask trades through them.
     Win rate needs to beat breakeven over hundreds of markets before it means anything; a handful of trades is noise.
   </footer>
 </div>
@@ -309,6 +351,9 @@ function renderTrades(trades) {
       <td class="num">${cents(t.fair)}</td>
       <td class="num ${cls(t.edge)}">${t.edge >= 0 ? "+" : "−"}${Math.abs(t.edge * 100).toFixed(1)}¢</td>
       <td class="num">${Math.round(t.t_rem)}s</td>
+      <td class="num">${t.gap == null ? "—" : (t.gap >= 0 ? "+" : "−") + "$" + Math.abs(t.gap).toFixed(0)}</td>
+      <td class="num">${t.vol_ratio == null ? "—" : t.vol_ratio.toFixed(2)}</td>
+      <td>${esc(t.execution || "taker")}</td>
       <td>${res}</td>
       <td class="num ${cls(t.pnl)}">${t.status === "settled" ? usd(t.pnl) : "—"}</td>
       <td class="num muted" style="text-align:left">${esc(t.order_id)}</td>
@@ -322,7 +367,45 @@ function renderFeed(events) {
     <time>${hms(e.ts)}</time><span class="k k-${esc(e.kind)}">${esc(e.kind)}</span><span class="msg">${esc(e.msg)}</span></li>`).join("");
 }
 
+function renderSignal(st, live) {
+  const sig = st && st.signal, el = $("signal");
+  if (!sig) { el.hidden = true; return; }
+  const left = live ? Math.max(0, sig.close_ts - Date.now() / 1000) : null;
+  const active = live && left > 0;
+  const verb = sig.kind === "maker" ? "BID" : "BUY";
+  el.className = "signal" + (active ? "" : " old");
+  el.innerHTML = `<span class="what">${verb} ${esc(sig.side.toUpperCase())} ≤ ${cents(sig.price)} × ${sig.count}</span>
+    <span class="meta">${esc(sig.ticker)} · signal at ${Math.round(sig.t_rem)}s left${active ? ` · closes in ${Math.floor(left)}s` : ` · ${dt(sig.ts)} UTC`}</span>
+    <span class="meta">${active ? "Live signal: place it in the Kalshi app at or below this price." : "Last signal"}</span>`;
+  el.hidden = false;
+}
+
+function renderGate(g, st) {
+  if (!g) return;
+  const fv = (v) => v == null ? "n/a" : Array.isArray(v) ? v.map(fv).join(" / ") : typeof v === "number" ? (Math.abs(v) < 2 ? v.toFixed(3) : String(v)) : esc(v);
+  const labels = { trades: "200+ settled trades", ci_above_breakeven: "Win-rate CI above breakeven",
+    model_beats_market: "Model more accurate than market (Brier)", both_halves_profitable: "Profitable in both halves" };
+  $("gate-verdict").textContent = g.go ? "GO" : "NO-GO";
+  $("gate-verdict").className = "verdict " + (g.go ? "go" : "nogo");
+  $("gate-prog").style.width = `${Math.min(100, (g.checks.trades.value / g.checks.trades.need) * 100)}%`;
+  $("gate-checks").innerHTML = Object.entries(g.checks).map(([k, c]) =>
+    `<li class="${c.ok ? "ok" : "no"}"><span class="mark">${c.ok ? "✓" : "✗"}</span><span>${labels[k] || esc(k)}</span>
+     <span class="val">${fv(c.value)} vs ${fv(c.need)}</span></li>`).join("");
+  const r = st && st.risk;
+  $("riskline").textContent = r ? `Paper bankroll $${r.bankroll.toFixed(2)} · today ${usd(r.day_pnl)} of −$${r.daily_loss_cap} stop · max $${r.per_trade_cap}/trade` : "";
+}
+
+function renderTally(skips) {
+  if (!skips || !skips.length) return;
+  const max = skips[0][1];
+  $("tally").innerHTML = skips.map(([label, n]) =>
+    `<li><span>${esc(label)}</span><span class="n">${n}</span><span class="bar"><i style="width:${(n / max) * 100}%"></i></span></li>`).join("");
+}
+
 function render(state, live) {
+  renderSignal(state.status, live);
+  renderGate(state.gate, state.status);
+  renderTally(state.skips);
   renderKpis(state.summary);
   renderNow(state.status, live);
   renderChart(state.curve);
@@ -355,6 +438,6 @@ if (SNAPSHOT) {
   };
   poll();
   setInterval(poll, 2000);
-  setInterval(() => last && renderNow(last.status, true), 1000);
+  setInterval(() => { if (last) { renderNow(last.status, true); renderSignal(last.status, true); } }, 1000);
 }
 </script>

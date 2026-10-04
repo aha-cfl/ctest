@@ -141,3 +141,97 @@ def report(data_dir: Path, lo=0.78, hi=0.85, min_edge=0.02, contracts=10, max_t_
         lines.append("  fair bucket |   n | avg fair | realized YES")
         lines += [f"  {b:>11} | {n:3d} | {f:8.3f} | {y:8.3f}" for b, n, f, y in cal["table"]]
     return "\n".join(lines)
+
+
+# ---- live trades report + go/no-go gate ---------------------------------------------------
+GATE_MIN_TRADES = 200
+
+
+def _stats(rows: list[dict]) -> dict:
+    n = len(rows)
+    if not n:
+        return {"n": 0}
+    wins = sum(r["won"] for r in rows)
+    contracts = sum(r["count"] for r in rows)
+    staked = sum(r["count"] * r["price"] + r["fee"] for r in rows)
+    pnl = sum(r["pnl"] for r in rows)
+    lo, hi = wilson(wins, n)
+    return {"n": n, "wins": wins, "win_rate": wins / n, "ci_low": lo, "ci_high": hi,
+            "breakeven": staked / contracts, "pnl": pnl, "roi": pnl / staked if staked else 0.0,
+            "pred_edge": sum(r["edge"] for r in rows) / n,
+            "real_edge": pnl / contracts}
+
+
+def _bucket(rows, key, edges, fmt):
+    out = []
+    for a, b in zip(edges, edges[1:]):
+        sel = [r for r in rows if r.get(key) is not None and a <= r[key] < b]
+        if sel:
+            out.append((fmt(a, b), _stats(sel)))
+    missing = [r for r in rows if r.get(key) is None]
+    if missing:
+        out.append(("n/a", _stats(missing)))
+    return out
+
+
+def settled_trades(data_dir: Path) -> list[dict]:
+    from .recorder import read_jsonl
+    latest = {}
+    for r in read_jsonl(Path(data_dir) / "trades.jsonl"):
+        latest[r["ticker"]] = r
+    return sorted((r for r in latest.values() if r["status"] == "settled"), key=lambda r: r["ts"])
+
+
+def gate(data_dir: Path) -> dict:
+    """Go/no-go for real money: enough trades, CI above breakeven, model beats market, stable halves."""
+    rows = settled_trades(data_dir)
+    s = _stats(rows)
+    by_ticker, outcomes = load(Path(data_dir))
+    cal = calibration(by_ticker, outcomes, 120.0)
+    half = len(rows) // 2
+    h1, h2 = _stats(rows[:half]), _stats(rows[half:])
+    checks = {
+        "trades": {"ok": s["n"] >= GATE_MIN_TRADES, "value": s["n"], "need": GATE_MIN_TRADES},
+        "ci_above_breakeven": {"ok": bool(s["n"]) and s["ci_low"] > s["breakeven"],
+                               "value": s.get("ci_low"), "need": s.get("breakeven")},
+        "model_beats_market": {"ok": cal["n"] > 0 and cal["brier_model"] < cal["brier_market"],
+                               "value": cal.get("brier_model"), "need": cal.get("brier_market")},
+        "both_halves_profitable": {"ok": h1["n"] > 0 and h2["n"] > 0 and h1["pnl"] > 0 and h2["pnl"] > 0,
+                                   "value": [h1.get("pnl"), h2.get("pnl")], "need": "> 0 each"},
+    }
+    return {"go": all(c["ok"] for c in checks.values()), "checks": checks, "summary": s,
+            "calibration_n": cal["n"]}
+
+
+def trades_report(data_dir: Path) -> str:
+    rows = settled_trades(data_dir)
+    if not rows:
+        return "no settled trades yet"
+    s = _stats(rows)
+    pc = lambda v: f"{v:.1%}"
+    line = lambda name, st: (f"  {name:<14} n={st['n']:>4}  win {pc(st['win_rate'])} "
+                             f"(CI {pc(st['ci_low'])}-{pc(st['ci_high'])})  breakeven {pc(st['breakeven'])}  "
+                             f"P&L ${st['pnl']:+.2f}  edge pred {st['pred_edge'] * 100:+.1f}c / real {st['real_edge'] * 100:+.1f}c")
+    out = ["ALL", line("all", s)]
+    for title, key, edges, fmt in (
+        ("BY VOL RATIO (market / realized)", "vol_ratio", [0, 0.8, 1.2, 99], lambda a, b: f"{a}-{b}" if b < 99 else f">= {a}"),
+        ("BY SECONDS LEFT AT ENTRY", "t_rem", [0, 30, 60, 90, 121], lambda a, b: f"{a}-{b}s"),
+        ("BY ENTRY PRICE", "price", [0.78, 0.80, 0.82, 0.86], lambda a, b: f"{a:.2f}-{b:.2f}"),
+    ):
+        out.append(title)
+        out += [line(name, st) for name, st in _bucket(rows, key, edges, fmt)]
+    out.append("BY SIDE / EXECUTION")
+    for key in ("side", "execution"):
+        for v in sorted({r.get(key) or "taker" for r in rows}):
+            out.append(line(f"{key}={v}", _stats([r for r in rows if (r.get(key) or "taker") == v])))
+    g = gate(data_dir)
+    out.append(f"GATE: {'GO' if g['go'] else 'NO-GO'}")
+    def fv(v):
+        if isinstance(v, float):
+            return f"{v:.4f}"
+        if isinstance(v, list):
+            return "[" + ", ".join(fv(x) for x in v) + "]"
+        return "n/a" if v is None else str(v)
+    for name, c in g["checks"].items():
+        out.append(f"  [{'x' if c['ok'] else ' '}] {name}: {fv(c['value'])} (need {fv(c['need'])})")
+    return "\n".join(out)

@@ -1,7 +1,7 @@
 """Watch one paper trade end to end: wait for the final 2 minutes, decide, buy, settle.
 
 Uses the real Trader + PaperExecutor against the simulated exchange from kalshi_demo
-(stale, noisy pricing so the model finds an edge). Run: python -m examples.kalshi_trade_demo [--favorite] [--max-trades N] [--data DIR] [--seed S] [--quiet]
+(stale, noisy pricing so the model finds an edge). Run: python -m examples.kalshi_trade_demo [--favorite] [--maker] [--kelly] [--max-trades N] [--data DIR] [--seed S] [--quiet]
 """
 import sys
 import tempfile
@@ -12,6 +12,7 @@ from examples.kalshi_demo import SimExchange
 from kalshi.client import Coinbase, Kalshi
 from kalshi.execution import PaperExecutor
 from kalshi.recorder import read_jsonl
+from kalshi.risk import RiskBook, RiskConfig
 from kalshi.trader import Rule, Trader
 
 BASE = 1_790_000_000
@@ -26,9 +27,12 @@ def main():
     ex.advance(3600)
     clock = lambda: datetime.fromtimestamp(BASE + ex.now, timezone.utc).strftime("%H:%M:%S")
     out = Path(_opt("--data", "") or tempfile.mkdtemp())
-    rule = Rule(mode="favorite" if "--favorite" in sys.argv else "model")
+    rule = Rule(mode="favorite" if "--favorite" in sys.argv else "model",
+                execution="maker" if "--maker" in sys.argv else "taker")
+    risk = RiskBook(out, RiskConfig(bankroll=float(_opt("--bankroll", 100)))) if "--kelly" in sys.argv else None
     quiet = "--quiet" in sys.argv
     trader = Trader(Kalshi(ex), Coinbase(ex), PaperExecutor(), out, rule, max_trades=int(_opt("--max-trades", 1)),
+                    risk=risk,
                     log=(lambda m: m.startswith(("<<<", ">>>")) and print(f"[{clock()}] {m}")) if quiet
                     else (lambda m: print(f"[{clock()}] {m}")))
     print(f"[{clock()}] [trader] rule={rule.mode} band {rule.lo:.2f}-{rule.hi:.2f} "

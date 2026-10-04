@@ -21,6 +21,7 @@ def main(argv=None):
     a.add_argument("--contracts", type=int, default=10)
     a.add_argument("--max-t-rem", type=float, default=120)
     sub.add_parser("resolve", help="fetch results for recorded markets missing an outcome")
+    sub.add_parser("report", help="live paper trades: win rate vs breakeven, breakdowns, go/no-go gate")
     d = sub.add_parser("dashboard", help="serve the live dashboard (read-only)")
     d.add_argument("--host", default="127.0.0.1", help="keep 127.0.0.1 and use an SSH tunnel; there is no login")
     d.add_argument("--port", type=int, default=8080)
@@ -39,6 +40,12 @@ def main(argv=None):
     t.add_argument("--min-gap", type=float, default=5.0, help="$ basis guard around the strike")
     t.add_argument("--min-vol-ratio", type=float, default=0.0, help="market/realized vol filter, 0=off")
     t.add_argument("--spot", choices=["composite", "coinbase"], default="composite")
+    t.add_argument("--execution", choices=["taker", "maker"], default="taker")
+    t.add_argument("--bankroll", type=float, default=100.0, help="paper bankroll for Kelly sizing")
+    t.add_argument("--per-trade-cap", type=float, default=5.0)
+    t.add_argument("--daily-loss-cap", type=float, default=25.0)
+    t.add_argument("--no-news-filter", action="store_true")
+    t.add_argument("--ntfy-topic", help="push alerts to https://ntfy.sh/<topic> (needs ntfy.sh allowed)")
     args = p.parse_args(argv)
     data = Path(args.data)
 
@@ -55,10 +62,22 @@ def main(argv=None):
         from .execution import PaperExecutor
         from .trader import Rule, Trader
         from .prices import CompositeSpot
+        from .filters import FilterConfig
+        from .risk import RiskBook, RiskConfig
         rule = Rule(args.rule, args.lo, args.hi, args.min_edge, args.max_t_rem, args.contracts,
-                    args.min_gap, args.min_vol_ratio)
+                    args.min_gap, args.min_vol_ratio, args.execution)
         spot = CompositeSpot() if args.spot == "composite" else Coinbase()
-        Trader(Kalshi(), spot, PaperExecutor(), data, rule, max_trades=args.max_trades).run()
+        risk = RiskBook(data, RiskConfig(args.bankroll, 0.25, args.per_trade_cap, args.daily_loss_cap))
+        notify = None
+        if args.ntfy_topic:
+            import requests
+            notify = lambda msg: requests.post(f"https://ntfy.sh/{args.ntfy_topic}", data=msg.encode(),
+                                               headers={"Title": "Kalshi BTC signal", "Priority": "high"}, timeout=5)
+        Trader(Kalshi(), spot, PaperExecutor(), data, rule, max_trades=args.max_trades, risk=risk,
+               filters=FilterConfig(news_blackout=not args.no_news_filter), notify=notify).run()
+    elif args.cmd == "report":
+        from .analyze import trades_report
+        print(trades_report(data))
     elif args.cmd == "analyze":
         print(report(data, args.lo, args.hi, args.min_edge, args.contracts, args.max_t_rem))
     else:

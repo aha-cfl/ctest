@@ -113,3 +113,19 @@ python -m examples.kalshi_trade_demo --favorite --max-trades 25 --data /tmp/desk
 python -m kalshi --data /tmp/desk dashboard                  # browse the simulated run
 ```
 `install.sh` also enables `kalshi-dashboard.service`. It binds to localhost only (no login), so view it from your laptop with `ssh -L 8080:localhost:8080 you@server` and open http://localhost:8080.
+
+## Strategy upgrades (paper)
+| Piece | File | Default |
+|---|---|---|
+| Composite BTC price (median of Coinbase, Kraken, Bitstamp, Gemini; skips unreachable venues) | `kalshi/prices.py` | on |
+| Market-implied vs realized vol on every decision; optional filter | `kalshi/model.py` `implied_sigma` | logged; `--min-vol-ratio 0` (off) |
+| Basis guard: expected 60s-average settlement within $X of strike | `kalshi/trader.py` | `--min-gap 5` |
+| Wide spread / 5-min vol spike / scheduled US macro releases | `kalshi/filters.py` | 3¢, 2×, on (`--no-news-filter`) |
+| Quarter-Kelly sizing, $ cap per trade, daily loss stop, kill switch | `kalshi/risk.py` | `--bankroll 100 --per-trade-cap 5 --daily-loss-cap 25`, `data/live/KILL` |
+| Maker execution: bid 1¢+ under the ask, fill only on trade-through, cancel when edge is gone or at t-5s | `kalshi/trader.py` | `--execution maker` |
+| Signal alerts: dashboard banner; optional phone push via ntfy | `--ntfy-topic` | banner on |
+| Live report + real-money gate (200 trades, CI > breakeven, model Brier < market, both halves profitable) | `kalshi/analyze.py` | `python -m kalshi report` |
+
+`./run_here.sh start` now runs a taker and a maker paper trader side by side (`data/live`, `data/live-maker`); `./run_here.sh report | kill | resume` manage them.
+
+In simulation, naive maker orders lost money to adverse selection (fills happen when price moves against you); cancelling when the model edge disappears fixed most of it. Live data decides whether maker beats taker.
