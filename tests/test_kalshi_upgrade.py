@@ -69,3 +69,38 @@ def test_trader_records_vol_and_applies_gap_guard(tmp_path):
     assert t.traded_tickers
     trade = t.open_trades["KXBTC15M-T1"]
     assert trade["gap"] == pytest.approx(10) and "vol_ratio" in trade
+
+
+def test_http_get_retries_on_429(monkeypatch):
+    import kalshi.client as c
+    calls, sleeps = [], []
+
+    class R:
+        def __init__(self, code, headers=None):
+            self.status_code, self.headers = code, headers or {}
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError(self.status_code)
+        def json(self):
+            return {"ok": True}
+
+    seq = [R(429, {"Retry-After": "0.5"}), R(429), R(200)]
+    monkeypatch.setattr(c.requests, "get", lambda *a, **k: calls.append(1) or seq.pop(0))
+    monkeypatch.setattr(c.time, "sleep", sleeps.append)
+    assert c.http_get("u") == {"ok": True}
+    assert len(calls) == 3 and sleeps == [0.5, 2]
+
+
+def test_open_markets_cached():
+    hits = []
+
+    def get(url, params=None):
+        hits.append(url)
+        return {"markets": []}
+
+    k = Kalshi(get, markets_ttl=60)
+    k.open_markets(); k.open_markets()
+    assert len(hits) == 1
+    k0 = Kalshi(get, markets_ttl=0)
+    k0.open_markets(); k0.open_markets()
+    assert len(hits) == 3

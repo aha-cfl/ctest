@@ -327,6 +327,20 @@ class Trader:
             self._emit("win" if won else "loss", f"<<< SETTLED {ticker}: result {m.result.upper()} -> "
                        f"{'WIN' if won else 'LOSS'} payout ${payout:.2f} | P&L ${pnl:+.2f} ({row['return_pct']:+.1f}%)")
 
+    def resume(self) -> "Trader":
+        """Reload trades.jsonl so a restart keeps open positions (they still settle) and counts."""
+        from .recorder import read_jsonl
+        latest: dict[str, dict] = {}
+        for r in read_jsonl(self.trades_path):
+            latest[r["ticker"]] = r
+        for ticker, r in latest.items():
+            self.traded_tickers.add(ticker)
+            if r["status"] == "settled":
+                self.settled.append(r)
+            else:
+                self.open_trades[ticker] = r
+        return self
+
     def run(self, poll_s: float = 2.0, idle_s: float = 5.0) -> None:
         self.log(f"[trader] rule={self.rule} max_trades={self.max_trades} executor={type(self.executor).__name__} "
                  f"risk={None if self.risk is None else self.risk.cfg}")

@@ -143,3 +143,15 @@ def test_edge_gone_rule(tmp_path):
     assert t._edge_gone(o, 0.81)              # edge evaporated -> cancel
     assert not t._edge_gone({**o, "side": "no"}, 0.15)   # NO fair 0.85 - 0.80 - fee > 0.02 -> keep
     assert t._edge_gone({**o, "side": "no"}, 0.20)       # NO fair 0.80 -> no edge -> cancel
+
+
+def test_resume_restores_open_and_settled(tmp_path):
+    api = BookAPI(10_000.0, yes_bid=0.78, no_bid=0.20)
+    t, _, _ = mk(api, tmp_path, rule=Rule(mode="favorite"))
+    t.tick(10_000 - 90)                                         # opens a position
+    t2, _, _ = mk(api, tmp_path, rule=Rule(mode="favorite"))
+    t2.resume()
+    assert "KXBTC15M-T1" in t2.open_trades and "KXBTC15M-T1" in t2.traded_tickers
+    api.status, api.result = "settled", "yes"
+    t2.tick(10_001)                                             # restarted trader still settles it
+    assert t2.done and t2.settled[0]["won"]

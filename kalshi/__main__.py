@@ -74,7 +74,7 @@ def main(argv=None):
             notify = lambda msg: requests.post(f"https://ntfy.sh/{args.ntfy_topic}", data=msg.encode(),
                                                headers={"Title": "Kalshi BTC signal", "Priority": "high"}, timeout=5)
         Trader(Kalshi(), spot, PaperExecutor(), data, rule, max_trades=args.max_trades, risk=risk,
-               filters=FilterConfig(news_blackout=not args.no_news_filter), notify=notify).run()
+               filters=FilterConfig(news_blackout=not args.no_news_filter), notify=notify).resume().run()
     elif args.cmd == "report":
         from .analyze import trades_report
         print(trades_report(data))

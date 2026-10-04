@@ -6,6 +6,7 @@ implicitly via outcomes.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
@@ -19,10 +20,16 @@ SERIES = "KXBTC15M"
 Getter = Callable[[str, dict | None], dict | list]
 
 
-def http_get(url: str, params: dict | None = None) -> dict | list:
-    r = requests.get(url, params=params, timeout=10, headers={"User-Agent": "kalshi-recorder/0.1"})
-    r.raise_for_status()
-    return r.json()
+def http_get(url: str, params: dict | None = None, retries: int = 3) -> dict | list:
+    """GET JSON; on HTTP 429 wait (Retry-After or 1s, 2s, 4s) and retry."""
+    for attempt in range(retries + 1):
+        r = requests.get(url, params=params, timeout=10, headers={"User-Agent": "kalshi-recorder/0.1"})
+        if r.status_code == 429 and attempt < retries:
+            wait = r.headers.get("Retry-After")
+            time.sleep(float(wait) if wait and wait.replace(".", "", 1).isdigit() else 2 ** attempt)
+            continue
+        r.raise_for_status()
+        return r.json()
 
 
 def parse_ts(s: str) -> float:
@@ -80,12 +87,18 @@ def parse_book(raw: dict) -> Book:
 
 
 class Kalshi:
-    def __init__(self, get: Getter = http_get, base: str = KALSHI_BASE):
+    def __init__(self, get: Getter = http_get, base: str = KALSHI_BASE, markets_ttl: float = 15.0):
         self.get, self.base = get, base
+        self.markets_ttl, self._markets, self._markets_at = markets_ttl, None, 0.0
 
     def open_markets(self) -> list[Market]:
-        raw = self.get(f"{self.base}/markets", {"series_ticker": SERIES, "status": "open", "limit": 20})
-        return sorted((parse_market(m) for m in raw.get("markets", [])), key=lambda m: m.close_ts)
+        """Cached for `markets_ttl` seconds: the list only changes when a 15-minute market rolls."""
+        now = time.monotonic()
+        if self._markets is None or now - self._markets_at >= self.markets_ttl:
+            raw = self.get(f"{self.base}/markets", {"series_ticker": SERIES, "status": "open", "limit": 20})
+            self._markets = sorted((parse_market(m) for m in raw.get("markets", [])), key=lambda m: m.close_ts)
+            self._markets_at = now
+        return self._markets
 
     def market(self, ticker: str) -> Market:
         return parse_market(self.get(f"{self.base}/markets/{ticker}", None)["market"])
