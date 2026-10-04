@@ -1,0 +1,4 @@
+pyyaml>=6
+requests>=2.31
+pytest>=8
+ccxt>=4.3        # live mode only

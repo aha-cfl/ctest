@@ -1,0 +1,20 @@
+[Unit]
+Description=Kalshi paper desk dashboard (read-only, localhost only)
+After=network.target
+
+[Service]
+Type=simple
+User=kalshi
+WorkingDirectory=/opt/kalshi
+# 127.0.0.1 only: there is no login. View with: ssh -L 8080:localhost:8080 you@server
+ExecStart=/opt/kalshi/.venv/bin/python -m kalshi --data /var/lib/kalshi dashboard --host 127.0.0.1 --port 8080
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/var/lib/kalshi
+
+[Install]
+WantedBy=multi-user.target

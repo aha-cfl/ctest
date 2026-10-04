@@ -1,0 +1,21 @@
+[Unit]
+Description=Kalshi KXBTC15M recorder (market data only, no orders)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kalshi
+WorkingDirectory=/opt/kalshi
+ExecStart=/opt/kalshi/.venv/bin/python -m kalshi --data /var/lib/kalshi record
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/kalshi
+
+[Install]
+WantedBy=multi-user.target
