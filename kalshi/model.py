@@ -50,3 +50,33 @@ def taker_fee_per_contract(price: float, contracts: int = 10, rate: float = 0.07
     """Kalshi taker fee: ceil_to_cent(rate * C * P * (1-P)), spread over C contracts."""
     total = math.ceil(round(rate * contracts * price * (1 - price) * 100, 9)) / 100
     return total / contracts
+
+
+SECONDS_PER_YEAR = 365 * 24 * 3600
+
+
+def annualize(sigma_s: float) -> float:
+    return sigma_s * math.sqrt(SECONDS_PER_YEAR)
+
+
+def implied_sigma(price_yes: float, spot: float, strike: float, t_rem: float,
+                  locked_mean: float | None = None, window: int = WINDOW_S) -> float | None:
+    """Per-second vol at which fair_yes == price_yes (bisection).
+
+    None when the price carries no vol information: at the 1c/99c rails, at the money
+    (any vol gives 50%), or when the price points the opposite way from spot vs strike.
+    """
+    if not 0.02 <= price_yes <= 0.98 or t_rem <= 0:
+        return None
+    f = lambda s: fair_yes(spot, strike, t_rem, s, locked_mean, window)
+    lo, hi = 1e-9, 1e-2                       # ~0.0006% .. 560% annualized
+    f_lo, f_hi = f(lo), f(hi)
+    if abs(f_hi - f_lo) < 1e-6 or (f_lo - price_yes) * (f_hi - price_yes) > 0:
+        return None
+    for _ in range(80):
+        mid = math.sqrt(lo * hi)              # bisect in log space
+        if (f(mid) - price_yes) * (f_lo - price_yes) > 0:
+            lo, f_lo = mid, f(mid)
+        else:
+            hi = mid
+    return math.sqrt(lo * hi)

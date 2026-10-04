@@ -36,11 +36,15 @@ def main(argv=None):
     t.add_argument("--hi", type=float, default=0.85)
     t.add_argument("--min-edge", type=float, default=0.02)
     t.add_argument("--max-t-rem", type=float, default=120)
+    t.add_argument("--min-gap", type=float, default=5.0, help="$ basis guard around the strike")
+    t.add_argument("--min-vol-ratio", type=float, default=0.0, help="market/realized vol filter, 0=off")
+    t.add_argument("--spot", choices=["composite", "coinbase"], default="composite")
     args = p.parse_args(argv)
     data = Path(args.data)
 
     if args.cmd == "record":
-        Recorder(Kalshi(), Coinbase(), data, window_s=args.window).run(poll_s=args.poll, idle_poll_s=5.0)
+        from .prices import CompositeSpot
+        Recorder(Kalshi(), CompositeSpot(), data, window_s=args.window).run(poll_s=args.poll, idle_poll_s=5.0)
     elif args.cmd == "dashboard":
         from .dashboard import serve
         serve(data, args.host, args.port)
@@ -50,8 +54,11 @@ def main(argv=None):
     elif args.cmd == "paper-trade":
         from .execution import PaperExecutor
         from .trader import Rule, Trader
-        rule = Rule(args.rule, args.lo, args.hi, args.min_edge, args.max_t_rem, args.contracts)
-        Trader(Kalshi(), Coinbase(), PaperExecutor(), data, rule, max_trades=args.max_trades).run()
+        from .prices import CompositeSpot
+        rule = Rule(args.rule, args.lo, args.hi, args.min_edge, args.max_t_rem, args.contracts,
+                    args.min_gap, args.min_vol_ratio)
+        spot = CompositeSpot() if args.spot == "composite" else Coinbase()
+        Trader(Kalshi(), spot, PaperExecutor(), data, rule, max_trades=args.max_trades).run()
     elif args.cmd == "analyze":
         print(report(data, args.lo, args.hi, args.min_edge, args.contracts, args.max_t_rem))
     else:

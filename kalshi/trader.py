@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .client import Coinbase, Kalshi
-from .model import WINDOW_S, fair_yes, sigma_per_second, taker_fee_per_contract
+from .model import WINDOW_S, annualize, fair_yes, implied_sigma, sigma_per_second, taker_fee_per_contract
 from .recorder import append_jsonl
 
 
@@ -26,6 +26,8 @@ class Rule:
     min_edge: float = 0.02
     max_t_rem: float = 120.0
     contracts: int = 1
+    min_gap_usd: float = 5.0        # skip when expected settlement is this close to strike (venue basis)
+    min_vol_ratio: float = 0.0      # 0=off; else buy only if market-implied vol / realized vol >= this
 
 
 @dataclass
@@ -117,9 +119,23 @@ class Trader:
         locked = self.spot_samples.get(m.ticker)
         if self.sigma is None or now - self.sigma_ts >= 60:
             self.sigma, self.sigma_ts = sigma_per_second(self.spot_src.closes_1m(60)), now
-        fy = fair_yes(spot, m.strike, t_rem, self.sigma, sum(locked) / len(locked) if locked else None)
+        locked_mean = sum(locked) / len(locked) if locked else None
+        fy = fair_yes(spot, m.strike, t_rem, self.sigma, locked_mean)
         book = self.kalshi.book(m.ticker)
-        self.cur.update(spot=spot, fair_yes=round(fy, 4), yes_ask=book.yes_ask, no_ask=book.no_ask)
+        # expected settlement value: locked part of the 60s average + spot for the rest
+        k = max(0.0, WINDOW_S - t_rem)
+        expected = (k * locked_mean + (WINDOW_S - k) * spot) / WINDOW_S if locked_mean is not None else spot
+        gap = expected - m.strike
+        mid = (book.yes_bid + book.yes_ask) / 2 if book.yes_bid is not None and book.yes_ask is not None else None
+        iv = implied_sigma(mid, spot, m.strike, t_rem, locked_mean) if mid is not None else None
+        rv_ann, iv_ann = annualize(self.sigma), (annualize(iv) if iv else None)
+        ratio = iv_ann / rv_ann if iv_ann and rv_ann else None
+        venues = getattr(self.spot_src, "venues", "coinbase")
+        self.cur.update(spot=spot, fair_yes=round(fy, 4), yes_ask=book.yes_ask, no_ask=book.no_ask,
+                        gap=round(gap, 2), vol_realized=round(rv_ann, 4),
+                        vol_implied=round(iv_ann, 4) if iv_ann else None,
+                        vol_ratio=round(ratio, 3) if ratio else None, venues=venues)
+        vol_note = f"vol mkt {iv_ann:.0%} vs real {rv_ann:.0%}" if iv_ann else f"vol real {rv_ann:.0%}"
 
         sides = [("yes", book.yes_ask, fy, book.no_bid_size), ("no", book.no_ask, 1 - fy, book.yes_bid_size)]
         notes = []
@@ -134,13 +150,19 @@ class Trader:
             if self.rule.mode == "model" and edge < self.rule.min_edge:
                 notes.append(f"{side} ask {ask:.2f} fair {fair:.3f} edge {edge:+.3f} < {self.rule.min_edge:.2f}")
                 continue
+            if abs(gap) < self.rule.min_gap_usd:
+                notes.append(f"expected settle ${gap:+.0f} from strike < ${self.rule.min_gap_usd:.0f} basis guard")
+                continue
+            if self.rule.min_vol_ratio and (ratio is None or ratio < self.rule.min_vol_ratio):
+                notes.append(f"vol ratio {ratio if ratio is None else round(ratio, 2)} < {self.rule.min_vol_ratio}")
+                continue
             self._buy(now, m, side, ask, fair, edge, depth, spot, t_rem)
             return
         if self.last_skip[0] == m.ticker and now - self.last_skip[1] < 15:
             return
         self.last_skip = (m.ticker, now)
         self._say(f"{m.ticker} t-{t_rem:5.1f}s spot {spot:,.2f} vs strike {m.strike:,.2f} | "
-                  f"fair YES {fy:.3f} | skip: {'; '.join(notes) or 'empty book'}", kind="skip")
+                  f"fair YES {fy:.3f} | {vol_note} | skip: {'; '.join(notes) or 'empty book'}", kind="skip")
 
     def _buy(self, now, m, side, ask, fair, edge, depth, spot, t_rem) -> None:
         fill = self.executor.buy(m.ticker, side, ask, self.rule.contracts, depth)
@@ -149,7 +171,8 @@ class Trader:
             return
         trade = {"ts": now, "ticker": m.ticker, "close_ts": m.close_ts, "strike": m.strike, "spot": spot,
                  "t_rem": round(t_rem, 1), "fair": round(fair, 4), "edge": round(edge, 4),
-                 "rule": self.rule.mode, "status": "open", **asdict(fill)}
+                 "rule": self.rule.mode, "status": "open", **asdict(fill),
+                 **{k: self.cur.get(k) for k in ("gap", "vol_realized", "vol_implied", "vol_ratio", "venues")}}
         self.open_trades[m.ticker] = trade
         self.traded_tickers.add(m.ticker)
         append_jsonl(self.trades_path, trade)
@@ -181,6 +204,7 @@ class Trader:
                 self.tick(time.time())
             except Exception as e:  # keep running through network blips
                 self._emit("error", f"[trader] error: {e!r}")
-            time.sleep(poll_s if self.in_window or self.open_trades else idle_s)
+            final_minute = self.in_window and (self.cur.get("t_rem") or 999) <= WINDOW_S
+            time.sleep(1.0 if final_minute else poll_s if self.in_window or self.open_trades else idle_s)
         total = sum(r["pnl"] for r in self.settled)
         self.log(f"[trader] done: {len(self.settled)} trade(s), total P&L ${total:+.2f}")

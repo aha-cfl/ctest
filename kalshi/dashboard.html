@@ -249,6 +249,9 @@ function renderNow(st, live) {
       <div class="fact"><div class="k">Fair YES</div><div class="v">${cents(st.fair_yes)}</div></div>
       <div class="fact"><div class="k">YES ask</div><div class="v">${cents(st.yes_ask)}</div></div>
       <div class="fact"><div class="k">NO ask</div><div class="v">${cents(st.no_ask)}</div></div>
+      <div class="fact"><div class="k">Settle est. − strike</div><div class="v ${cls(st.gap)}">${st.gap == null ? "—" : (st.gap >= 0 ? "+" : "−") + "$" + Math.abs(st.gap).toFixed(0)}</div></div>
+      <div class="fact" title="Volatility the price implies vs volatility BTC is actually showing. Market > real means the favorite is cheap."><div class="k">Vol market / real</div><div class="v">${st.vol_implied == null ? "—" : Math.round(st.vol_implied * 100) + "%"} / ${st.vol_realized == null ? "—" : Math.round(st.vol_realized * 100) + "%"}${st.vol_ratio == null ? "" : ` <span class="${st.vol_ratio >= 1 ? "pos" : "neg"}">×${st.vol_ratio.toFixed(2)}</span>`}</div></div>
+      <div class="fact"><div class="k">Price sources</div><div class="v">${esc(st.venues || "—")}</div></div>
     </div>
     ${st.fair_yes != null ? `<div class="gauge">${gauge(st)}</div>` : ""}
     <div class="decision">${esc(st.msg)}</div>`;
