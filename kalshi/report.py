@@ -90,27 +90,87 @@ def calibration(by_ticker, outcomes, max_t_rem: float = 120.0) -> dict:
     return {"n": len(pts), "brier_model": brier(0), "brier_market": brier(1), "table": table}
 
 
+def _pick(snaps: list[dict], lo, hi, min_edge, contracts, max_t_rem, use_model):
+    """First snapshot (most time left first) where a side qualifies -> (side, ask, fee, fair) or None."""
+    for s in snaps:
+        if s["t_rem"] > max_t_rem:
+            continue
+        for side, ask, fair, depth in (("yes", s["yes_ask"], s["fair_yes"], s["no_bid_size"]),
+                                       ("no", s["no_ask"], 1 - s["fair_yes"], s["yes_bid_size"])):
+            if ask is None or not lo <= ask <= hi or depth < 1:
+                continue
+            fee = taker_fee_per_contract(ask, contracts)
+            if use_model and fair - ask - fee < min_edge:
+                continue
+            return side, ask, fee, fair
+    return None
+
+
 def backtest(data_dir: Path, lo=0.78, hi=0.85, min_edge=0.02, contracts=10, max_t_rem=120.0,
              use_model=True) -> dict:
     """Replay snapshots: first qualifying snapshot per market, taker fill at the ask."""
     by_ticker, outcomes = load_snapshots(data_dir)
     rows = []
     for ticker, snaps in by_ticker.items():
-        for s in snaps:
-            if s["t_rem"] > max_t_rem:
-                continue
-            cands = [("yes", s["yes_ask"], s["fair_yes"], s["no_bid_size"]),
-                     ("no", s["no_ask"], 1 - s["fair_yes"], s["yes_bid_size"])]
-            pick = next(((side, ask, taker_fee_per_contract(ask, contracts)) for side, ask, fair, depth in cands
-                         if ask is not None and lo <= ask <= hi and depth >= 1
-                         and (not use_model or fair - ask - taker_fee_per_contract(ask, contracts) >= min_edge)), None)
-            if pick:
-                side, ask, fee = pick
-                won = outcomes[ticker] == side
-                rows.append({"won": won, "count": 1, "price": ask, "fee": fee, "edge": 0.0,
-                             "pnl": (1.0 if won else 0.0) - ask - fee})
-                break
+        pick = _pick(snaps, lo, hi, min_edge, contracts, max_t_rem, use_model)
+        if pick:
+            side, ask, fee, _ = pick
+            won = outcomes[ticker] == side
+            rows.append({"won": won, "count": 1, "price": ask, "fee": fee, "edge": 0.0,
+                         "pnl": (1.0 if won else 0.0) - ask - fee})
     return stats(rows)
+
+
+def scorecard(data_dir: Path, book_names: list[str], lo=0.78, hi=0.85, min_edge=0.02, max_t_rem=120.0) -> dict:
+    """Every settled market the desk watched, newest first: the favorite at decision time, what a blind
+    78-85c buy and the model rule WOULD have done (1 contract, taker), and what each book actually did."""
+    d = Path(data_dir)
+    by_ticker, outcomes = load_snapshots(d)
+    meta = {o["ticker"]: o for o in read_jsonl(d / "outcomes.jsonl")}
+    actual = {b: {t["ticker"]: t for t in latest_trades(d / b)} for b in book_names}
+    rows, tally = [], {"blind": [], "model": []}
+    for ticker, snaps in by_ticker.items():
+        result = outcomes[ticker]
+        first = next((x for x in snaps if x["t_rem"] <= max_t_rem), snaps[-1])
+        yes_fav = (first["yes_ask"] or 0) >= (first["no_ask"] or 0)
+        row = {"ticker": ticker, "close_ts": meta.get(ticker, {}).get("close_ts", first.get("close_ts")),
+               "strike": meta.get(ticker, {}).get("strike"), "result": result,
+               "fav_side": "yes" if yes_fav else "no", "fav_ask": first["yes_ask"] if yes_fav else first["no_ask"],
+               "fav_fair": round(first["fair_yes"] if yes_fav else 1 - first["fair_yes"], 4)}
+        for name, use_model in (("blind", False), ("model", True)):
+            pick = _pick(snaps, lo, hi, min_edge, 1, max_t_rem, use_model)
+            if pick:
+                side, ask, fee, fair = pick
+                won = result == side
+                pnl = round((1.0 if won else 0.0) - ask - fee, 4)
+                row[name] = {"side": side, "price": ask, "fair": round(fair, 4), "won": won, "pnl": pnl}
+                tally[name].append(row[name])
+            else:
+                row[name] = None
+        row["actual"] = {b: ({k: tr.get(k) for k in ("side", "price", "count", "status", "won", "pnl", "execution")}
+                             if (tr := actual[b].get(ticker)) else None) for b in book_names}
+        rows.append(row)
+    rows.sort(key=lambda r: -(r["close_ts"] or 0))
+    summary = {k: {"n": len(v), "wins": sum(x["won"] for x in v), "losses": sum(not x["won"] for x in v),
+                   "pnl": round(sum(x["pnl"] for x in v), 4)} for k, v in tally.items()}
+    return {"markets": len(rows), "summary": summary, "rows": rows}
+
+
+def win_loss(settled: list[dict]) -> dict:
+    """Biggest / average win and loss, and the current streak (settled in time order)."""
+    wins = [t["pnl"] for t in settled if t["won"]]
+    losses = [t["pnl"] for t in settled if not t["won"]]
+    streak, kind = 0, None
+    for t in reversed(settled):
+        if kind is None:
+            kind = t["won"]
+        if t["won"] != kind:
+            break
+        streak += 1
+    return {"biggest_win": max(wins) if wins else None, "biggest_loss": min(losses) if losses else None,
+            "avg_win": sum(wins) / len(wins) if wins else None,
+            "avg_loss": sum(losses) / len(losses) if losses else None,
+            "streak": f"{streak}{'W' if kind else 'L'}" if streak else None}
 
 
 # ---- the real-money gate -------------------------------------------------------------------
@@ -236,6 +296,7 @@ def book_state(data_dir: Path, book: str, events: list[dict]) -> dict:
                     "avg_price": sum(t["price"] for t in settled) / n if n else None,
                     "pnl": round(cum, 4), "staked": round(s.get("staked", 0.0), 4), "roi": s.get("roi"),
                     "avg_edge": s.get("pred_edge")},
+        "win_loss": win_loss(settled),
         "curve": curve, "trades": list(reversed(trades)), "gate": gate(data_dir, book),
         "skips": skip_tally(events, book),
     }
@@ -245,7 +306,9 @@ def build_state(data_dir: Path, events_tail: int = 150, label: str | None = None
     d = Path(data_dir)
     events = read_jsonl(d / "events.jsonl")
     status_path = d / "status.json"
+    names = books(d) or ["taker"]
     return {"generated": time.time(), "label": label,
             "status": json.loads(status_path.read_text()) if status_path.exists() else None,
-            "books": {b: book_state(d, b, events) for b in books(d) or ["taker"]},
+            "books": {b: book_state(d, b, events) for b in names},
+            "scorecard": scorecard(d, names),
             "events": list(reversed(events[-events_tail:]))}

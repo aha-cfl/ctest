@@ -112,6 +112,23 @@ tr:last-child td { border-bottom: 0; }
 footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
 
 
+.stopped { padding: 10px 14px; border-radius: var(--r); background: var(--warn-soft); color: var(--warn);
+  font: 600 .85rem var(--f-data); }
+.wl { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.wl .fact .v.pos { color: var(--win); } .wl .fact .v.neg { color: var(--loss); }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters button { font: 500 .78rem var(--f-data); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--muted); cursor: pointer; }
+.filters button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.filters button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+tr.row-win td:first-child { box-shadow: inset 3px 0 0 var(--win); }
+tr.row-loss td:first-child { box-shadow: inset 3px 0 0 var(--loss); }
+tr.row-open td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.scroll { max-height: 440px; overflow: auto; }
+.scroll thead th { position: sticky; top: 0; background: var(--surface); }
+.sc-sum { display: flex; flex-wrap: wrap; gap: 8px; }
+.sc-chip { font: .8rem var(--f-data); padding: 4px 10px; border-radius: 8px; background: var(--surface-2); color: var(--muted); }
+.sc-chip b { color: var(--fg); font-weight: 600; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .tab { font: 500 .85rem var(--f-data); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
   background: var(--surface); color: var(--muted); cursor: pointer; }
@@ -135,7 +152,8 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
 .tally .bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--surface-2); overflow: hidden; }
 .tally .bar i { display: block; height: 100%; background: var(--faint); }
 .tally .n { font-family: var(--f-data); text-align: right; color: var(--muted); }
-@media (max-width: 900px) { .row3 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 900px) {
+  .wl { grid-template-columns: repeat(2, minmax(0, 1fr)); } .row3 { grid-template-columns: minmax(0, 1fr); } }
 
 @media (max-width: 900px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -163,6 +181,7 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
     </div>
   </header>
 
+  <div class="stopped" id="stopped" hidden></div>
   <nav class="tabs" id="tabs" aria-label="Paper book"></nav>
 
   <section class="kpis" aria-label="Summary">
@@ -174,6 +193,8 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
     <div class="kpi"><span class="label">Avg entry</span><span class="value" id="k-px">—</span><span class="note">per contract, before fee</span></div>
     <div class="kpi"><span class="label">Avg model edge</span><span class="value" id="k-edge">—</span><span class="note">fair − ask − fee at entry</span></div>
   </section>
+
+  <section class="wl" aria-label="Wins and losses" id="wl"></section>
 
   <div class="row2">
     <section class="panel" aria-label="Current market">
@@ -199,9 +220,23 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
     </section>
   </div>
 
+  <section class="panel" aria-label="Market scorecard">
+    <div class="panel-head"><h2>Every market: would-have results</h2>
+      <span class="sub">not trades · 1 contract at the ask · shows what each rule would have done</span></div>
+    <div class="sc-sum" id="sc-sum"></div>
+    <div class="filters" id="sc-filters"></div>
+    <div class="table-wrap scroll">
+      <table>
+        <thead><tr><th>Close (UTC)</th><th>Market</th><th>Result</th><th>Favorite at t-120s</th><th class="num">Model fair</th>
+          <th>Blind 78–85¢</th><th>Model rule</th><th>Desk did</th></tr></thead>
+        <tbody id="scorecard"><tr><td colspan="8" class="empty">No settled markets yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
   <section class="panel" aria-label="Trades">
-    <div class="panel-head"><h2>Executions</h2><span class="sub" id="trade-count">—</span></div>
-    <div class="table-wrap">
+    <div class="panel-head"><h2>Executions</h2><div class="filters" id="filters"></div></div>
+    <div class="table-wrap scroll">
       <table>
         <thead><tr>
           <th>Entry (UTC)</th><th>Market</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fee</th>
@@ -335,12 +370,26 @@ function niceStep(raw) {
   return (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p;
 }
 
-function renderTrades(trades) {
-  $("trade-count").textContent = `${trades.length} execution${trades.length === 1 ? "" : "s"}`;
-  if (!trades.length) { $("trades").innerHTML = `<tr><td colspan="15" class="empty">No executions yet.</td></tr>`; return; }
-  $("trades").innerHTML = trades.map((t) => {
+let tradeFilter = "all";
+const kindOf = (t) => t.status !== "settled" ? "open" : t.won ? "wins" : "losses";
+
+function renderTrades(trades, state, live) {
+  const counts = { all: trades.length, wins: 0, losses: 0, open: 0 };
+  trades.forEach((t) => counts[kindOf(t)]++);
+  const labels = { all: "All", wins: "Wins", losses: "Losses", open: "Open" };
+  $("filters").innerHTML = Object.keys(labels).map((k) =>
+    `<button type="button" data-f="${k}" aria-pressed="${k === tradeFilter}">${labels[k]} ${counts[k]}</button>`).join("");
+  $("filters").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    tradeFilter = b.dataset.f; render(state, live);
+  }));
+  const shown = tradeFilter === "all" ? trades : trades.filter((t) => kindOf(t) === tradeFilter);
+  if (!shown.length) {
+    const msg = trades.length ? `No ${labels[tradeFilter].toLowerCase()} yet.` : "No executions yet. The desk trades only when a side is 78–85¢ with a model edge.";
+    $("trades").innerHTML = `<tr><td colspan="15" class="empty">${msg}</td></tr>`; return;
+  }
+  $("trades").innerHTML = shown.map((t) => {
     const res = t.status === "settled" ? `<span class="tag ${t.won ? "win" : "loss"}">${t.won ? "WIN" : "LOSS"} · ${t.result.toUpperCase()}</span>` : `<span class="tag open">OPEN</span>`;
-    return `<tr>
+    return `<tr class="row-${kindOf(t) === "wins" ? "win" : kindOf(t) === "losses" ? "loss" : "open"}">
       <td class="num" style="text-align:left">${dt(t.ts)}</td>
       <td class="num" style="text-align:left">${esc(t.ticker)}</td>
       <td><span class="tag ${t.side}">${t.side.toUpperCase()}</span></td>
@@ -387,6 +436,62 @@ function renderTally(skips) {
     `<li><span>${esc(label)}</span><span class="n">${n}</span><span class="bar"><i style="width:${(n / max) * 100}%"></i></span></li>`).join("");
 }
 
+function renderWL(sm, wl) {
+  const money = (v) => v == null ? "—" : usd(v);
+  const cells = [
+    ["Wins / losses", `${sm.wins} / ${sm.losses}`, ""],
+    ["Biggest win", money(wl.biggest_win), "pos"],
+    ["Biggest loss", money(wl.biggest_loss), "neg"],
+    ["Avg win / avg loss", `${money(wl.avg_win)} / ${money(wl.avg_loss)}`, ""],
+    ["Current streak", wl.streak || "—", wl.streak ? (wl.streak.endsWith("W") ? "pos" : "neg") : ""],
+  ];
+  $("wl").innerHTML = cells.map(([k, v, c]) => `<div class="fact"><div class="k">${k}</div><div class="v ${c}">${esc(v)}</div></div>`).join("");
+}
+
+function scCell(x) {
+  if (!x) return `<span class="muted">no trade</span>`;
+  return `<span class="tag ${x.won ? "win" : "loss"}">${x.won ? "WIN" : "LOSS"}</span> ${esc(x.side.toUpperCase())} @ ${cents(x.price)} <span class="${cls(x.pnl)}">${usd(x.pnl)}</span>`;
+}
+
+let scFilter = "traded";
+
+function renderScorecard(sc, state, live) {
+  if (!sc) return;
+  const traded = (r) => r.blind || r.model || Object.values(r.actual).some(Boolean);
+  const nTraded = sc.rows.filter(traded).length;
+  $("sc-filters").innerHTML = [["traded", `Markets with a trade ${nTraded}`], ["all", `All markets ${sc.rows.length}`]]
+    .map(([k, label]) => `<button type="button" data-f="${k}" aria-pressed="${k === scFilter}">${label}</button>`).join("");
+  $("sc-filters").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { scFilter = b.dataset.f; render(state, live); }));
+  const chip = (name, t) => `<span class="sc-chip">${name}: <b>${t.wins}W ${t.losses}L</b> · <b class="${cls(t.pnl)}">${usd(t.pnl)}</b></span>`;
+  $("sc-sum").innerHTML = `<span class="sc-chip"><b>${sc.markets}</b> settled markets watched</span>` +
+    chip("Blind 78–85¢", sc.summary.blind) + chip("Model rule", sc.summary.model);
+  const rows = scFilter === "all" ? sc.rows : sc.rows.filter(traded);
+  if (!rows.length) { $("scorecard").innerHTML = `<tr><td colspan="8" class="empty">${sc.rows.length ? "No market had a qualifying trade yet; switch to All markets." : "No settled markets yet."}</td></tr>`; return; }
+  $("scorecard").innerHTML = rows.map((r) => {
+    const did = Object.entries(r.actual).map(([b, t]) => t
+      ? `${esc(b)}: ${t.status === "settled" ? `<span class="tag ${t.won ? "win" : "loss"}">${t.won ? "WIN" : "LOSS"}</span> <span class="${cls(t.pnl)}">${usd(t.pnl)}</span>` : `<span class="tag open">OPEN</span>`}`
+      : `${esc(b)}: <span class="muted">skipped</span>`).join("<br>");
+    return `<tr>
+      <td class="num" style="text-align:left">${dt(r.close_ts)}</td>
+      <td class="num" style="text-align:left">${esc(r.ticker)}</td>
+      <td><span class="tag ${r.result}">${esc(r.result.toUpperCase())}</span></td>
+      <td class="num" style="text-align:left">${esc(r.fav_side.toUpperCase())} @ ${cents(r.fav_ask)}</td>
+      <td class="num">${cents(r.fav_fair)}</td>
+      <td>${scCell(r.blind)}</td>
+      <td>${scCell(r.model)}</td>
+      <td>${did}</td></tr>`;
+  }).join("");
+}
+
+function renderStopped(state, live) {
+  const st = state.status;
+  const ref = live ? Date.now() / 1000 : state.generated;
+  const age = st ? ref - st.ts : null;
+  const stopped = st && age > 120 && !st.done;
+  $("stopped").hidden = !stopped;
+  if (stopped) $("stopped").textContent = `Desk stopped · last seen ${dt(st.ts)} UTC (${Math.round(age / 60)} min before this view) · start it with ./run_here.sh start`;
+}
+
 let selected = null;
 try { selected = localStorage.getItem("desk-book"); } catch (e) {}
 
@@ -410,10 +515,13 @@ function render(state, live) {
   const bs = state.status && state.status.books && state.status.books[selected];
   renderGate(book.gate, bs && bs.risk);
   renderTally(book.skips);
+  renderStopped(state, live);
   renderKpis(book.summary);
+  renderWL(book.summary, book.win_loss || {});
+  renderScorecard(state.scorecard, state, live);
   renderNow(state.status, live);
   renderChart(book.curve);
-  renderTrades(book.trades);
+  renderTrades(book.trades, state, live);
   renderFeed(state.events);
 }
 

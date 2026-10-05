@@ -86,3 +86,32 @@ def test_render_embeds_state_safely(tmp_path):
     assert html.startswith("<!doctype html>") and "</script><b>x" not in html and "<\\/script>" in html
     live = render(None, full_document=False)
     assert "const SNAPSHOT = null;" in live and not live.startswith("<!doctype")
+
+
+def test_scorecard_would_have_vs_actual(tmp_path):
+    from kalshi.report import scorecard
+    s_a = {**_snap("A", 100, 0.90, 0.80, 0.22), "close_ts": 100}          # model edge on YES @ 0.80
+    s_b = {**_snap("B", 100, 0.80, 0.80, 0.22), "close_ts": 200}          # blind buys, model skips
+    s_c = {**_snap("C", 100, 0.50, 0.50, 0.52), "close_ts": 300}          # nothing in band
+    _w(tmp_path / "snapshots.jsonl", [s_a, s_b, s_c])
+    _w(tmp_path / "outcomes.jsonl", [{"ticker": "A", "result": "yes", "close_ts": 100, "strike": 1},
+                                     {"ticker": "B", "result": "no", "close_ts": 200, "strike": 1},
+                                     {"ticker": "C", "result": "yes", "close_ts": 300, "strike": 1}])
+    _w(tmp_path / "taker" / "trades.jsonl", [_trade("A", 50, "settled", won=True, result="yes", pnl=0.18)])
+    sc = scorecard(tmp_path, ["taker"])
+    assert [r["ticker"] for r in sc["rows"]] == ["C", "B", "A"]            # newest first
+    rows = {r["ticker"]: r for r in sc["rows"]}
+    assert rows["A"]["blind"]["won"] and rows["A"]["model"]["won"] and rows["A"]["actual"]["taker"]["won"]
+    assert rows["B"]["blind"]["won"] is False and rows["B"]["model"] is None and rows["B"]["actual"]["taker"] is None
+    assert rows["C"]["blind"] is None and rows["C"]["fav_side"] == "no"
+    assert sc["summary"]["blind"] == {"n": 2, "wins": 1, "losses": 1, "pnl": pytest.approx(0.18 - 0.82)}
+    assert sc["summary"]["model"]["wins"] == 1 and sc["summary"]["model"]["losses"] == 0
+
+
+def test_win_loss_stats_and_streak():
+    from kalshi.report import win_loss
+    rows = [{"won": True, "pnl": 0.2}, {"won": False, "pnl": -0.8}, {"won": True, "pnl": 0.1}, {"won": True, "pnl": 0.3}]
+    wl = win_loss(rows)
+    assert wl["biggest_win"] == 0.3 and wl["biggest_loss"] == -0.8 and wl["streak"] == "2W"
+    assert wl["avg_win"] == pytest.approx(0.2) and wl["avg_loss"] == pytest.approx(-0.8)
+    assert win_loss([])["streak"] is None

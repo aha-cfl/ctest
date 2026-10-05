@@ -11,6 +11,15 @@ python -m kalshi demo        # the same desk against a simulated exchange, no ne
 ```
 On a server: `sudo ./deploy/install.sh` installs one systemd service (`Restart=always`, `RestartSec=1`). Dashboard: `ssh -L 8080:localhost:8080 you@server`, then open http://localhost:8080.
 
+## See wins and losses
+The dashboard (`data/live/desk.html`, refreshed every 30s; live at http://localhost:8080 with `run --serve 8080`) shows:
+- **Executions** with `All | Wins | Losses | Open` filters; green/red row stripes, P&L per trade
+- **Win/loss strip:** wins vs losses, biggest and average win/loss, current streak
+- **Every market (would-have):** for each settled market the desk watched, what a blind 78–85¢ buy and the model rule *would* have done, next to what the desk actually did. Labeled as not-trades, so it never mixes with paper fills.
+- A **"Desk stopped"** banner if the data is more than 2 minutes old
+
+`python -m kalshi demo --max-trades 25 --out /tmp/demo && python -m kalshi --data /tmp/demo export /tmp/demo.html` gives a filled-in example from the simulator.
+
 ## How it decides
 | Step | Where |
 |---|---|
