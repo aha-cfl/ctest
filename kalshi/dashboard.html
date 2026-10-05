@@ -111,13 +111,12 @@ tr:last-child td { border-bottom: 0; }
 
 footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
 
-.signal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 16px; border-radius: var(--r);
-  background: var(--accent-soft); border: 1px solid var(--accent); }
-.signal .what { font: 700 1.15rem var(--f-data); color: var(--accent); }
-.signal .meta { font: .85rem var(--f-data); color: var(--muted); }
-.signal.old { background: var(--surface); border-color: var(--line); }
-.signal.old .what { color: var(--fg); }
 
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tab { font: 500 .85rem var(--f-data); padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--muted); cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .row3 { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 16px; }
 .gate-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .verdict { font: 700 .8rem var(--f-data); letter-spacing: .06em; padding: 3px 10px; border-radius: 999px; }
@@ -164,7 +163,7 @@ footer { color: var(--faint); font-size: .76rem; line-height: 1.6; }
     </div>
   </header>
 
-  <section class="signal old" id="signal" hidden aria-live="polite"></section>
+  <nav class="tabs" id="tabs" aria-label="Paper book"></nav>
 
   <section class="kpis" aria-label="Summary">
     <div class="kpi"><span class="label">Total P&amp;L</span><span class="value" id="k-pnl">—</span><span class="note" id="k-roi">—</span></div>
@@ -300,7 +299,7 @@ function renderNow(st, live) {
 }
 
 function renderChart(curve) {
-  if (!curve.length) return;
+  if (!curve.length) { $("chart").innerHTML = `<div class="empty">No settled trades yet.</div>`; return; }
   const W = 640, H = 240, L = 54, R = 16, T = 14, B = 30;
   const ys = curve.map((c) => c.pnl).concat([0]);
   let lo = Math.min(...ys), hi = Math.max(...ys);
@@ -338,7 +337,7 @@ function niceStep(raw) {
 
 function renderTrades(trades) {
   $("trade-count").textContent = `${trades.length} execution${trades.length === 1 ? "" : "s"}`;
-  if (!trades.length) return;
+  if (!trades.length) { $("trades").innerHTML = `<tr><td colspan="15" class="empty">No executions yet.</td></tr>`; return; }
   $("trades").innerHTML = trades.map((t) => {
     const res = t.status === "settled" ? `<span class="tag ${t.won ? "win" : "loss"}">${t.won ? "WIN" : "LOSS"} · ${t.result.toUpperCase()}</span>` : `<span class="tag open">OPEN</span>`;
     return `<tr>
@@ -367,22 +366,9 @@ function renderFeed(events) {
     <time>${hms(e.ts)}</time><span class="k k-${esc(e.kind)}">${esc(e.kind)}</span><span class="msg">${esc(e.msg)}</span></li>`).join("");
 }
 
-function renderSignal(st, live) {
-  const sig = st && st.signal, el = $("signal");
-  if (!sig) { el.hidden = true; return; }
-  const left = live ? Math.max(0, sig.close_ts - Date.now() / 1000) : null;
-  const active = live && left > 0;
-  const verb = sig.kind === "maker" ? "BID" : "BUY";
-  el.className = "signal" + (active ? "" : " old");
-  el.innerHTML = `<span class="what">${verb} ${esc(sig.side.toUpperCase())} ≤ ${cents(sig.price)} × ${sig.count}</span>
-    <span class="meta">${esc(sig.ticker)} · signal at ${Math.round(sig.t_rem)}s left${active ? ` · closes in ${Math.floor(left)}s` : ` · ${dt(sig.ts)} UTC`}</span>
-    <span class="meta">${active ? "Live signal: place it in the Kalshi app at or below this price." : "Last signal"}</span>`;
-  el.hidden = false;
-}
-
-function renderGate(g, st) {
+function renderGate(g, r) {
   if (!g) return;
-  const fv = (v) => v == null ? "n/a" : Array.isArray(v) ? v.map(fv).join(" / ") : typeof v === "number" ? (Math.abs(v) < 2 ? v.toFixed(3) : String(v)) : esc(v);
+  const fv = (v) => v == null ? "n/a" : Array.isArray(v) ? v.map(fv).join(" / ") : typeof v === "number" ? (Number.isInteger(v) ? String(v) : Math.abs(v) < 2 ? v.toFixed(3) : v.toFixed(2)) : esc(v);
   const labels = { trades: "200+ settled trades", ci_above_breakeven: "Win-rate CI above breakeven",
     model_beats_market: "Model more accurate than market (Brier)", both_halves_profitable: "Profitable in both halves" };
   $("gate-verdict").textContent = g.go ? "GO" : "NO-GO";
@@ -391,25 +377,43 @@ function renderGate(g, st) {
   $("gate-checks").innerHTML = Object.entries(g.checks).map(([k, c]) =>
     `<li class="${c.ok ? "ok" : "no"}"><span class="mark">${c.ok ? "✓" : "✗"}</span><span>${labels[k] || esc(k)}</span>
      <span class="val">${fv(c.value)} vs ${fv(c.need)}</span></li>`).join("");
-  const r = st && st.risk;
   $("riskline").textContent = r ? `Paper bankroll $${r.bankroll.toFixed(2)} · today ${usd(r.day_pnl)} of −$${r.daily_loss_cap} stop · max $${r.per_trade_cap}/trade` : "";
 }
 
 function renderTally(skips) {
-  if (!skips || !skips.length) return;
+  if (!skips || !skips.length) { $("tally").innerHTML = `<li><span class="muted">No skips yet.</span><span></span></li>`; return; }
   const max = skips[0][1];
   $("tally").innerHTML = skips.map(([label, n]) =>
     `<li><span>${esc(label)}</span><span class="n">${n}</span><span class="bar"><i style="width:${(n / max) * 100}%"></i></span></li>`).join("");
 }
 
+let selected = null;
+try { selected = localStorage.getItem("desk-book"); } catch (e) {}
+
+function renderTabs(state, live) {
+  const names = Object.keys(state.books);
+  if (!names.includes(selected)) selected = names[0];
+  $("tabs").innerHTML = names.map((n) => {
+    const s = state.books[n].summary;
+    return `<button class="tab" role="tab" aria-selected="${n === selected}" data-book="${esc(n)}">${esc(n)} · ${s.settled} trades · ${usd(s.pnl)}</button>`;
+  }).join("");
+  $("tabs").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    selected = b.dataset.book;
+    try { localStorage.setItem("desk-book", selected); } catch (e) {}
+    render(state, live);
+  }));
+}
+
 function render(state, live) {
-  renderSignal(state.status, live);
-  renderGate(state.gate, state.status);
-  renderTally(state.skips);
-  renderKpis(state.summary);
+  renderTabs(state, live);
+  const book = state.books[selected];
+  const bs = state.status && state.status.books && state.status.books[selected];
+  renderGate(book.gate, bs && bs.risk);
+  renderTally(book.skips);
+  renderKpis(book.summary);
   renderNow(state.status, live);
-  renderChart(state.curve);
-  renderTrades(state.trades);
+  renderChart(book.curve);
+  renderTrades(book.trades);
   renderFeed(state.events);
 }
 
@@ -431,13 +435,13 @@ if (SNAPSHOT) {
       last = await r.json();
       render(last, true);
       const age = Date.now() / 1000 - (last.status?.ts || 0);
-      setConn(age < 30, age < 30 ? "live" : `trader quiet ${Math.round(age)}s`);
+      setConn(age < 30, age < 30 ? "live" : `desk quiet ${Math.round(age)}s`);
     } catch (e) {
       setConn(false, "dashboard offline");
     }
   };
   poll();
   setInterval(poll, 2000);
-  setInterval(() => { if (last) { renderNow(last.status, true); renderSignal(last.status, true); } }, 1000);
+  setInterval(() => { if (last) renderNow(last.status, true); }, 1000);
 }
 </script>

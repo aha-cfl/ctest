@@ -1,4 +1,4 @@
-"""Fair value of a KXBTC15M YES contract and Kalshi fees.
+"""Pure math: fair value of a KXBTC15M YES contract, implied/realized vol, Kalshi fees, Kelly.
 
 Settlement: YES pays $1 if the 60s average of CF Benchmarks BRTI (1 print/sec) over the
 final minute is above the market's floor_strike. Model: driftless Brownian price with
@@ -80,3 +80,12 @@ def implied_sigma(price_yes: float, spot: float, strike: float, t_rem: float,
         else:
             hi = mid
     return math.sqrt(lo * hi)
+
+
+def kelly_fraction(p_win: float, price: float, fee: float) -> float:
+    """Full-Kelly bankroll fraction for a $1 binary bought at price+fee. <= 0 means no bet."""
+    cost = price + fee
+    if not 0 < cost < 1:
+        return 0.0
+    b = (1 - cost) / cost                  # net odds received on a win
+    return (p_win * b - (1 - p_win)) / b

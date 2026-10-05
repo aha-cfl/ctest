@@ -1,5 +1,5 @@
 [Unit]
-Description=Kalshi KXBTC15M recorder (market data only, no orders)
+Description=Kalshi KXBTC15M paper desk (one process: record, decide, paper-fill, settle, dashboard)
 After=network-online.target
 Wants=network-online.target
 
@@ -7,9 +7,10 @@ Wants=network-online.target
 Type=simple
 User=kalshi
 WorkingDirectory=/opt/kalshi
-ExecStart=/opt/kalshi/.venv/bin/python -m kalshi --data /var/lib/kalshi record
+# Paper only: no real orders. Dashboard on 127.0.0.1:8080 (no login): ssh -L 8080:localhost:8080 you@server
+ExecStart=/opt/kalshi/.venv/bin/python -m kalshi --data /var/lib/kalshi run --serve 8080
 Restart=always
-RestartSec=10
+RestartSec=1
 Environment=PYTHONUNBUFFERED=1
 NoNewPrivileges=true
 ProtectSystem=strict
